@@ -9,5 +9,4 @@ export const DEFAULT_RELAYS = [
 export const DEFAULT_TRACKERS = [
   "wss://tracker.openwebtorrent.com",
   "wss://tracker.webtorrent.dev",
-  "wss://tracker.btorrent.xyz",
 ];

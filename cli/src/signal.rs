@@ -17,8 +17,7 @@ use tokio_tungstenite::tungstenite::Message;
 pub const NOSTR_KIND: u64 = 21_917;
 pub const DEFAULT_RELAYS: [&str; 4] =
     ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net", "wss://nostr.mom"];
-pub const DEFAULT_TRACKERS: [&str; 3] =
-    ["wss://tracker.openwebtorrent.com", "wss://tracker.webtorrent.dev", "wss://tracker.btorrent.xyz"];
+pub const DEFAULT_TRACKERS: [&str; 2] = ["wss://tracker.openwebtorrent.com", "wss://tracker.webtorrent.dev"];
 
 #[derive(Clone, Debug)]
 pub enum OutCmd {
