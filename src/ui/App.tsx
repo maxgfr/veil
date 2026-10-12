@@ -1,6 +1,13 @@
 import type { JSX } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { encodeRoomKey, newRoomKey, parseRoomLink } from "../crypto/room";
+import {
+  encodeRoomKey,
+  newRoomKey,
+  parseRoomLink,
+  parseRoomMode,
+  type RoomMode,
+  roomFragment,
+} from "../crypto/room";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { applyUpdate, updateReady } from "./pwa";
 import { Home } from "./screens/Home";
@@ -10,23 +17,26 @@ import { settings } from "./settings";
 
 type Route =
   | { name: "home" }
-  | { name: "lobby"; key: Uint8Array; passphrase: string }
+  | { name: "lobby"; key: Uint8Array; passphrase: string; mode: RoomMode }
   | {
       name: "room";
       key: Uint8Array;
+      mode: RoomMode;
       session: RoomSession;
       RoomView: typeof import("./screens/Room").Room;
     };
 
 const loadRoom = () => Promise.all([import("./session"), import("./screens/Room")]);
 
-function linkFor(key: Uint8Array): string {
-  return `${location.href.split("#")[0]}#${encodeRoomKey(key)}`;
+function linkFor(key: Uint8Array, mode: RoomMode): string {
+  return `${location.href.split("#")[0]}#${roomFragment(key, mode)}`;
 }
 
 function routeFromHash(): Route {
   const key = parseRoomLink(location.hash);
-  return key ? { name: "lobby", key, passphrase: "" } : { name: "home" };
+  return key
+    ? { name: "lobby", key, passphrase: "", mode: parseRoomMode(location.hash) }
+    : { name: "home" };
 }
 
 export function App(): JSX.Element {
@@ -41,7 +51,12 @@ export function App(): JSX.Element {
         const key = parseRoomLink(location.hash);
         if (r.name === "room") return r;
         return key
-          ? { name: "lobby", key, passphrase: r.name === "lobby" ? r.passphrase : "" }
+          ? {
+              name: "lobby",
+              key,
+              passphrase: r.name === "lobby" ? r.passphrase : "",
+              mode: parseRoomMode(location.hash),
+            }
           : { name: "home" };
       });
     };
@@ -54,10 +69,10 @@ export function App(): JSX.Element {
     if (route.name === "lobby") void loadRoom();
   }, [route.name]);
 
-  const goLobby = (key: Uint8Array, passphrase: string) => {
-    history.pushState(null, "", `#${encodeRoomKey(key)}`);
+  const goLobby = (key: Uint8Array, passphrase: string, mode: RoomMode) => {
+    history.pushState(null, "", `#${roomFragment(key, mode)}`);
     setError(null);
-    setRoute({ name: "lobby", key, passphrase });
+    setRoute({ name: "lobby", key, passphrase, mode });
   };
 
   const goHome = () => {
@@ -65,7 +80,7 @@ export function App(): JSX.Element {
     setRoute({ name: "home" });
   };
 
-  const join = async (key: Uint8Array, c: LobbyChoice) => {
+  const join = async (key: Uint8Array, mode: RoomMode, c: LobbyChoice) => {
     setBusy(true);
     setError(null);
     try {
@@ -78,7 +93,7 @@ export function App(): JSX.Element {
         audio: c.audio,
         video: c.video,
       });
-      setRoute({ name: "room", key, session, RoomView: Room });
+      setRoute({ name: "room", key, mode, session, RoomView: Room });
     } catch (err) {
       console.error(err);
       setError("Could not open the room. Check your connection and try again.");
@@ -91,20 +106,21 @@ export function App(): JSX.Element {
   if (route.name === "home") {
     screen = (
       <Home
-        onCreate={(passphrase) => goLobby(newRoomKey(), passphrase)}
-        onJoin={(key, passphrase) => goLobby(key, passphrase)}
+        onCreate={(passphrase, mode) => goLobby(newRoomKey(), passphrase, mode)}
+        onJoin={(key, passphrase, mode) => goLobby(key, passphrase, mode)}
         onSettings={() => setSettingsOpen(true)}
       />
     );
   } else if (route.name === "lobby") {
     screen = (
       <Lobby
-        key={encodeRoomKey(route.key)}
+        key={`${route.mode}:${encodeRoomKey(route.key)}`}
+        mode={route.mode}
         passphrase={route.passphrase}
         busy={busy}
         error={error}
         onBack={goHome}
-        onJoin={(c) => void join(route.key, c)}
+        onJoin={(c) => void join(route.key, route.mode, c)}
       />
     );
   } else {
@@ -112,7 +128,8 @@ export function App(): JSX.Element {
     screen = (
       <RoomView
         session={session}
-        link={linkFor(route.key)}
+        link={linkFor(route.key, route.mode)}
+        mode={route.mode}
         onLeave={() => {
           void session.leave();
           goHome();

@@ -7,6 +7,7 @@ import {
   hkdf,
   newRoomKey,
   parseRoomLink,
+  parseRoomMode,
   pbkdf2,
   roomLink,
   utcDay,
@@ -43,6 +44,18 @@ describe("room", () => {
     expect(parseRoomLink("https://maxgfr.github.io/veil/")).toBeNull();
     expect(parseRoomLink("#short")).toBeNull();
     expect(parseRoomLink(`#${encodeRoomKey(key)}x`)).toBeNull();
+  });
+
+  test("files links open the files interface and carry the same key", () => {
+    const key = newRoomKey();
+    const files = roomLink("https://maxgfr.github.io/veil/", key, "files");
+    expect(files).toBe(`https://maxgfr.github.io/veil/#files/${encodeRoomKey(key)}`);
+    expect(parseRoomLink(files)).toEqual(key);
+    expect(parseRoomMode(files)).toBe("files");
+    expect(parseRoomMode(roomLink("https://maxgfr.github.io/veil/", key))).toBe("call");
+    expect(parseRoomLink(`files/${encodeRoomKey(key)}`)).toEqual(key);
+    expect(parseRoomLink("#files/short")).toBeNull();
+    expect(parseRoomLink(`#other/${encodeRoomKey(key)}`)).toBeNull();
   });
 
   test("derivation is deterministic, the topic rotates daily, keys do not", async () => {

@@ -26,15 +26,33 @@ export function encodeRoomKey(key: Uint8Array): string {
   return toB64u(key);
 }
 
-/** Builds the share link. `base` is the app URL without fragment. */
-export function roomLink(base: string, key: Uint8Array): string {
-  return `${base.split("#")[0]}#${encodeRoomKey(key)}`;
+/**
+ * Which interface a link opens. The key is the same either way: a "files"
+ * member and a "call" member can share one room.
+ */
+export type RoomMode = "call" | "files";
+
+const FILES_PREFIX = "files/";
+
+/** The part of a link after "#": `<key>` for a call room, `files/<key>` for a files room. */
+export function roomFragment(key: Uint8Array, mode: RoomMode = "call"): string {
+  return `${mode === "files" ? FILES_PREFIX : ""}${encodeRoomKey(key)}`;
 }
 
-/** Accepts a full link, a "#fragment" or a bare key. Returns null if invalid. */
-export function parseRoomLink(input: string): Bytes | null {
+/** Builds the share link. `base` is the app URL without fragment. */
+export function roomLink(base: string, key: Uint8Array, mode: RoomMode = "call"): string {
+  return `${base.split("#")[0]}#${roomFragment(key, mode)}`;
+}
+
+function fragmentOf(input: string): string {
   const s = input.trim();
-  const frag = s.includes("#") ? s.slice(s.lastIndexOf("#") + 1) : s;
+  return s.includes("#") ? s.slice(s.lastIndexOf("#") + 1) : s;
+}
+
+/** Accepts a full link, a "#fragment" or a bare key (with or without "files/"). Returns null if invalid. */
+export function parseRoomLink(input: string): Bytes | null {
+  let frag = fragmentOf(input);
+  if (frag.startsWith(FILES_PREFIX)) frag = frag.slice(FILES_PREFIX.length);
   if (!/^[A-Za-z0-9_-]{43}$/.test(frag)) return null;
   try {
     const key = fromB64u(frag);
@@ -42,6 +60,10 @@ export function parseRoomLink(input: string): Bytes | null {
   } catch {
     return null;
   }
+}
+
+export function parseRoomMode(input: string): RoomMode {
+  return fragmentOf(input).startsWith(FILES_PREFIX) ? "files" : "call";
 }
 
 export function utcDay(ms: number = Date.now()): number {

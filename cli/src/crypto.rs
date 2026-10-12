@@ -85,18 +85,23 @@ pub fn new_room_key() -> [u8; 32] {
     random()
 }
 
-/// Accepts a full link, a "#fragment" or a bare key.
+const FILES_PREFIX: &str = "files/";
+
+/// Accepts a full link, a "#fragment" or a bare key, for a call room (`<key>`) or a files room (`files/<key>`).
 pub fn parse_room_link(input: &str) -> Option<[u8; 32]> {
     let s = input.trim();
     let frag = s.rsplit('#').next().unwrap_or(s);
+    let frag = frag.strip_prefix(FILES_PREFIX).unwrap_or(frag);
     if frag.len() != 43 || !frag.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') {
         return None;
     }
     from_b64u(frag).ok()?.try_into().ok()
 }
 
-pub fn room_link(base: &str, key: &[u8; 32]) -> String {
-    format!("{}#{}", base.split('#').next().unwrap_or(base), b64u(key))
+/// The share link; `files` opens the web app's files interface (no camera or microphone).
+pub fn room_link(base: &str, key: &[u8; 32], files: bool) -> String {
+    let prefix = if files { FILES_PREFIX } else { "" };
+    format!("{}#{prefix}{}", base.split('#').next().unwrap_or(base), b64u(key))
 }
 
 /// Everything derived from the room key (and optional passphrase).
@@ -296,8 +301,12 @@ mod tests {
     #[test]
     fn links() {
         let key = new_room_key();
-        let link = room_link("https://maxgfr.github.io/veil/", &key);
+        let link = room_link("https://maxgfr.github.io/veil/", &key, false);
         assert_eq!(parse_room_link(&link), Some(key));
+        let files = room_link("https://maxgfr.github.io/veil/", &key, true);
+        assert_eq!(files, format!("https://maxgfr.github.io/veil/#files/{}", b64u(&key)));
+        assert_eq!(parse_room_link(&files), Some(key));
+        assert_eq!(parse_room_link(&format!("#other/{}", b64u(&key))), None);
         assert_eq!(parse_room_link("https://maxgfr.github.io/veil/"), None);
     }
 

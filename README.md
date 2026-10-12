@@ -24,8 +24,8 @@ Terminal users get the same protocol with the [`veil` CLI](#cli).
 | | |
 |---|---|
 | Chat | Plain text, delivery receipts, typing indicator. Messages live in memory only. |
-| Files | No size limit. Streamed from disk to disk in 63 KiB chunks, SHA-256 per chunk and per file, resumes after a disconnection. |
-| Calls | Camera, microphone, screen sharing. Media frames are end-to-end encrypted (Encoded Transforms) when the browser supports it, shown by the **E2EE media** badge. |
+| Files | No size limit. Streamed from disk to disk in 63 KiB chunks, SHA-256 per chunk and per file, resumes after a disconnection. **Send files** opens a files room (`…/veil/#files/<key>`): no camera or microphone, just a drop zone and every transfer with its progress. Call rooms have the same Files view in a side panel. |
+| Calls | Camera, microphone, screen sharing; pick the devices and test the microphone in Settings. Media frames are end-to-end encrypted (Encoded Transforms) when the browser supports it, shown by the **E2EE media** badge. |
 | Rooms | No participant cap: a partial mesh (about 6 links each) relays data; video goes to the most recent speakers when a device's uplink runs out. |
 | Verify | Compare 4 emojis with someone to rule out any interception, even by someone holding the link. |
 
@@ -45,13 +45,14 @@ you can add your own TURN server in Settings. Veil runs no TURN server.
 ```sh
 brew install maxgfr/tap/veil
 
-veil send report.pdf photos.zip       # opens a room, prints its link and a QR code
+veil send report.pdf photos.zip       # opens a files room, prints its link and a QR code
 veil receive 'https://maxgfr.github.io/veil/#…' --out ~/Downloads
 veil chat 'https://maxgfr.github.io/veil/#…'
-veil new                              # just print a fresh room link
+veil new [--files]                    # just print a fresh room link
 ```
 
-Files go straight to whoever accepts them, verified by SHA-256, with the same
+`veil send` shares a files-room link, so people opening it in a browser land on the
+Files view, without any camera or microphone prompt. Files go straight to whoever accepts them, verified by SHA-256, with the same
 encryption as the browser. Useful options: `--passphrase` (or
 `VEIL_PASSPHRASE`), `--yes` to accept without asking, `--once` to exit after one
 transfer, `--relay`/`--tracker`/`--stun`/`--turn` to choose the network. Prebuilt

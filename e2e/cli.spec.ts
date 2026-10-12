@@ -67,16 +67,21 @@ test("the CLI sends a file to a browser", async ({ browser }) => {
   await b.ctx.addInitScript(() => {
     delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
   });
+  // `veil send` shares a files room: the browser opens the Files view, no camera or microphone.
+  expect(link).toContain("#files/");
   await joinRoom(b, link, "Browser");
+  await expect(b.page.getByTestId("room")).toHaveAttribute("data-mode", "files");
+  await expect(b.page.getByTestId("toggle-mic")).toHaveCount(0);
   await closeSheets(b.page);
   await waitMembers(b.page, 1, 30_000);
-  await openChat(b.page);
-  await b.page.getByTestId("file-accept").click({ timeout: 30_000 });
-  await expect(b.page.locator("[data-testid=file-card][data-state=done]")).toBeVisible({
+  const panel = b.page.getByTestId("files-panel");
+  await expect(panel.getByText("From Terminal")).toBeVisible({ timeout: 30_000 });
+  await panel.getByTestId("file-accept").click();
+  await expect(panel.locator("[data-testid=file-card][data-state=done]")).toBeVisible({
     timeout: 60_000,
   });
   const download = b.page.waitForEvent("download");
-  await b.page.getByTestId("file-save").click();
+  await panel.getByTestId("file-save").click();
   const saved = join(dir, "received.bin");
   await (await download).saveAs(saved);
   expect(sha(readFileSync(saved))).toBe(sha(data));
