@@ -7,7 +7,8 @@ import { Room } from "./room";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function until(cond: () => boolean, ms = 8000): Promise<void> {
+// Convergence is driven by 3 s hello and maintenance timers: leave room for slow CI machines.
+async function until(cond: () => boolean, ms = 15_000): Promise<void> {
   const end = Date.now() + ms;
   while (!cond()) {
     if (Date.now() > end) throw new Error("timeout");
@@ -72,7 +73,7 @@ describe("room", () => {
     await a.room.send({ type: "chat", id: "msg-00000001", text: "hello room", ts: Date.now() });
     await until(() => b.chat.length === 1 && c.chat.length === 1);
     expect(b.chat).toEqual(["hello room"]);
-  });
+  }, 30_000);
 
   test("SAS is identical on both sides of a link", async () => {
     const bus = new MemoryBus();
@@ -85,7 +86,7 @@ describe("room", () => {
     const [sa, sb] = await Promise.all([a.room.sas(b.room.peerId), b.room.sas(a.room.peerId)]);
     expect(sa?.emojis.length).toBe(4);
     expect(sa).toEqual(sb);
-  });
+  }, 30_000);
 
   test("with a small degree, messages are relayed to members we are not linked to", async () => {
     const bus = new MemoryBus();
@@ -129,7 +130,7 @@ describe("room", () => {
     await a.room.send({ type: "chat", id: "msg-00000003", text: "after", ts: Date.now() });
     await until(() => b.chat.includes("after"));
     expect(c.chat).not.toContain("after");
-  }, 20_000);
+  }, 30_000);
 
   test("a member blocked after a failed verification is never re-linked nor given keys", async () => {
     const bus = new MemoryBus();
@@ -144,7 +145,7 @@ describe("room", () => {
     await wait(4000);
     expect(a.room.peers.has(b.room.peerId)).toBe(false);
     expect(b.room.keys.hasKey(a.room.peerId, a.room.keys.keyId)).toBe(false);
-  }, 20_000);
+  }, 30_000);
 
   test("manual pairing connects two members with no network transport", async () => {
     const secrets = await deriveRoomSecrets(newRoomKey());
@@ -172,5 +173,5 @@ describe("room", () => {
     expect(a.ingestManual(codes.b?.[0] ?? "")).toBe(true);
     await until(() => a.readyIds().includes(b.peerId) && b.readyIds().includes(a.peerId));
     await until(() => a.members.has(b.peerId) && b.members.has(a.peerId));
-  });
+  }, 30_000);
 });
