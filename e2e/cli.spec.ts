@@ -16,6 +16,10 @@ const NET = [
   "http://localhost:4173/?nosw",
 ];
 
+// Chromium hides host IPs behind mDNS names; CI runners do not route multicast DNS, so the CLI
+// could not resolve them. Real networks also offer STUN candidates; here we expose host IPs instead.
+test.use({ launchOptions: { args: ["--disable-features=WebRtcHideLocalIpsWithMdns"] } });
+
 test.skip(
   !existsSync(BIN),
   `build the CLI first (cargo build --manifest-path cli/Cargo.toml): ${BIN}`,

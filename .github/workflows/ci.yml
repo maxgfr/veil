@@ -49,7 +49,7 @@ jobs:
       - run: cargo test --locked
 
   e2e:
-    name: End-to-end (Chromium, WebKit, mobile, CLI interop)
+    name: End-to-end (Chromium, phones, CLI interop)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -65,13 +65,38 @@ jobs:
         with:
           workspaces: cli
       - run: cargo build --locked --manifest-path cli/Cargo.toml
-      - run: bunx playwright install --with-deps chromium webkit
-      - run: bun run test:e2e
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e --project=chromium --project=mobile-chrome
+        env:
+          CI: "true"
+          VEIL_E2E_VERBOSE: "1"
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-results-chromium
+          path: test-results/
+          retention-days: 7
+
+  e2e-webkit:
+    # Playwright's Linux WebKit cannot establish WebRTC connections; Safari's engine is tested on macOS.
+    name: End-to-end (WebKit, iPhone)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install webkit
+      - run: bun run test:e2e --project=webkit --project=mobile-safari
         env:
           CI: "true"
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-results
+          name: playwright-results-webkit
           path: test-results/
           retention-days: 7
