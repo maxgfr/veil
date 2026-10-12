@@ -276,11 +276,14 @@ async fn send(paths: Vec<PathBuf>, room_link: Option<String>, once: bool, net: N
     let (room, mut events) = room::spawn(net.room_options(key));
     announce_room(&net.base, &key, net.passphrase.is_some());
     eprintln!("Waiting for someone to join… (Ctrl-C to stop)");
+    // One listener for the whole session: a Ctrl-C between two iterations must not be lost.
+    let stop = ctrl_c();
+    tokio::pin!(stop);
     let mut names = Names(HashMap::new());
     let mut last_progress = Instant::now();
     loop {
         tokio::select! {
-            _ = ctrl_c() => break,
+            _ = &mut stop => break,
             ev = events.recv() => {
                 let Some(ev) = ev else { break };
                 names.on_event(&ev);
@@ -333,9 +336,12 @@ async fn receive(link: String, out: PathBuf, yes: bool, once: bool, net: NetArgs
     let mut linked: Vec<String> = Vec::new();
     let mut last_progress = Instant::now();
     let mut failed = false;
+    // One listener for the whole session: a Ctrl-C between two iterations must not be lost.
+    let stop = ctrl_c();
+    tokio::pin!(stop);
     loop {
         tokio::select! {
-            _ = ctrl_c() => break,
+            _ = &mut stop => break,
             ev = events.recv() => {
                 let Some(ev) = ev else { break };
                 names.on_event(&ev);
@@ -432,9 +438,12 @@ async fn chat(link: Option<String>, net: NetArgs) -> Result<()> {
     let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     let mut receipts: Vec<String> = Vec::new();
     let mut flush = tokio::time::interval(Duration::from_millis(800));
+    // One listener for the whole session: a Ctrl-C between two iterations must not be lost.
+    let stop = ctrl_c();
+    tokio::pin!(stop);
     loop {
         tokio::select! {
-            _ = ctrl_c() => break,
+            _ = &mut stop => break,
             _ = flush.tick() => if !receipts.is_empty() {
                 room.send_app(json!({"type": "receipt", "ids": std::mem::take(&mut receipts)}));
             },
