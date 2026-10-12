@@ -64,7 +64,10 @@ export class RoomSession {
   readonly manualCode = signal<{ code: string; kind: "offer" | "answer" } | null>(null);
   readonly toasts = signal<Toast[]>([]);
   readonly unread = signal(0);
+  /** Files offered to us while the Files view was not on screen. */
+  readonly pendingFiles = signal(0);
   chatOpen = false;
+  filesVisible = false;
   transports: TransportStatus[] = [];
   links: LinkInfo[] = [];
   readonly verified = new Set<string>();
@@ -250,7 +253,13 @@ export class RoomSession {
       // Offers are re-announced to latecomers: show each file once.
       const known = this.files.incoming.has(msg.id);
       this.files.onApp(author, msg);
-      if (!known) this.chat.addFileEntry(author, msg.id, false);
+      if (!known) {
+        this.chat.addFileEntry(author, msg.id, false);
+        if (!this.filesVisible) {
+          this.pendingFiles.value++;
+          this.toast(`${this.nickOf(author)} wants to send you ${msg.name}`);
+        }
+      }
     } else if (msg.type === "file-cancel") {
       this.files.onApp(author, msg);
     } else {
@@ -345,6 +354,19 @@ export class RoomSession {
     const sink = await pickSink(inc);
     if (!sink) return;
     this.files.accept(id, sink);
+  }
+
+  setFilesVisible(visible: boolean): void {
+    this.filesVisible = visible;
+    if (visible) this.pendingFiles.value = 0;
+  }
+
+  /** Every file offered in the room, newest first (ours and others'). */
+  fileEntries(): { fileId: string; author: string; ts: number; mine: boolean }[] {
+    const out: { fileId: string; author: string; ts: number; mine: boolean }[] = [];
+    for (const m of this.chat.messages)
+      if (m.fileId) out.push({ fileId: m.fileId, author: m.author, ts: m.ts, mine: m.mine });
+    return out.reverse();
   }
 
   setChatOpen(open: boolean): void {

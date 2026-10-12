@@ -1,7 +1,9 @@
 import type { JSX } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import type { RoomMode } from "../../crypto/room";
 import { ChatPanel } from "../components/ChatPanel";
-import { ControlBar } from "../components/ControlBar";
+import { ControlBar, type SidePanel } from "../components/ControlBar";
+import { FilesPanel } from "../components/FilesPanel";
 import { hueOf, initials } from "../components/format";
 import { Icon } from "../components/Icons";
 import { SettingsSheet } from "../components/SettingsSheet";
@@ -27,11 +29,14 @@ function wideScreen(): boolean {
 export function Room(props: {
   session: RoomSession;
   link: string;
+  mode: RoomMode;
   onLeave: () => void;
 }): JSX.Element {
   const s = props.session;
   s.tick.value;
-  const [chatOpen, setChatOpen] = useState(wideScreen);
+  const files = props.mode === "files";
+  // A files room keeps the Files view uncluttered: chat is one button away.
+  const [side, setSide] = useState<SidePanel>(() => (!files && wideScreen() ? "chat" : null));
   const [share, setShare] = useState(false);
   const [people, setPeople] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -40,7 +45,8 @@ export function Room(props: {
 
   const members = s.members();
   const others = members.filter((m) => !m.self);
-  const inCall = members.some((m) => m.media.audio || m.media.video || m.media.screen);
+  // A files room never shows the call stage, even if someone else has a camera on.
+  const inCall = !files && members.some((m) => m.media.audio || m.media.video || m.media.screen);
   const connected = others.some((m) => m.link === "connected" || m.link === "reconnecting");
   const online = s.transports.filter((t) => t.state === "online").map((t) => t.name);
   const e2eeMedia = inCall && s.mediaE2ee();
@@ -69,7 +75,7 @@ export function Room(props: {
       const files = e.dataTransfer?.files;
       if (files?.length) {
         void s.offerFiles([...files]);
-        setChatOpen(true);
+        if (props.mode === "call") setSide("files");
       }
     };
     addEventListener("dragover", over);
@@ -80,7 +86,7 @@ export function Room(props: {
       removeEventListener("dragleave", leave);
       removeEventListener("drop", drop);
     };
-  }, [s]);
+  }, [s, props.mode]);
 
   // Open the invite sheet right away when you are alone in a brand-new room.
   useEffect(() => {
@@ -92,8 +98,9 @@ export function Room(props: {
 
   return (
     <div
-      class={`room${chatOpen ? " chat-open" : ""}${dragging ? " dragging" : ""}`}
+      class={`room room-${props.mode}${side ? " chat-open" : ""}${dragging ? " dragging" : ""}`}
       data-testid="room"
+      data-mode={props.mode}
       data-peer-id={s.peerId}
       data-key-id={String(s.room.keys.keyId)}
       data-members={String(others.length)}
@@ -115,6 +122,15 @@ export function Room(props: {
               {others.length === 0 ? "Waiting for others" : `${others.length + 1} in the room`}
             </span>
           </button>
+          {files && (
+            <span
+              class="chip chip-ok hide-sm"
+              title="A room for sending files: no camera or microphone"
+            >
+              <Icon name="file" size={14} />
+              Files
+            </span>
+          )}
           {e2eeMedia && (
             <span
               class="chip chip-ok"
@@ -166,7 +182,9 @@ export function Room(props: {
       )}
 
       <main class="stage">
-        {inCall ? (
+        {files ? (
+          <FilesPanel session={s} variant="main" onInvite={() => setShare(true)} />
+        ) : inCall ? (
           <VideoGrid session={s} members={members} />
         ) : (
           <div class="empty-stage">
@@ -211,14 +229,18 @@ export function Room(props: {
         )}
       </main>
 
-      <aside class="side" aria-hidden={!chatOpen}>
-        {chatOpen && <ChatPanel session={s} onClose={() => setChatOpen(false)} />}
+      <aside class="side" aria-hidden={!side}>
+        {side === "chat" && <ChatPanel session={s} onClose={() => setSide(null)} />}
+        {side === "files" && (
+          <FilesPanel session={s} variant="side" onClose={() => setSide(null)} />
+        )}
       </aside>
 
       <ControlBar
         session={s}
-        chatOpen={chatOpen}
-        onToggleChat={() => setChatOpen(!chatOpen)}
+        mode={props.mode}
+        side={side}
+        onSide={setSide}
         onLeave={props.onLeave}
       />
 

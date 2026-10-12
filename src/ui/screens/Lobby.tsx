@@ -1,5 +1,6 @@
 import type { JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import type { RoomMode } from "../../crypto/room";
 import { type DeviceInfo, listDevices, openDevices } from "../../features/devices";
 import { DeviceSelect, LevelMeter, useAudioLevel } from "../components/DeviceSettings";
 import { Icon } from "../components/Icons";
@@ -13,12 +14,14 @@ export interface LobbyChoice {
 }
 
 export function Lobby(props: {
+  mode: RoomMode;
   passphrase: string;
   busy: boolean;
   error: string | null;
   onJoin: (c: LobbyChoice) => void;
   onBack: () => void;
 }): JSX.Element {
+  const files = props.mode === "files";
   const [nick, setNick] = useState(settings.value.nick);
   const [passphrase, setPassphrase] = useState(props.passphrase);
   const [audio, setAudio] = useState(false);
@@ -94,49 +97,51 @@ export function Lobby(props: {
         <button type="button" class="icon-btn" aria-label="Back" onClick={props.onBack}>
           <Icon name="arrowLeft" />
         </button>
-        <span class="topbar-title">Ready to join?</span>
+        <span class="topbar-title">{files ? "Join the files room" : "Ready to join?"}</span>
         <span class="topbar-spacer" />
       </header>
-      <div class="lobby-body">
-        <div class="preview">
-          {video && stream ? (
-            <video
-              ref={videoEl}
-              class="mirror"
-              autoPlay
-              playsInline
-              muted
-              data-testid="lobby-preview"
-            />
-          ) : (
-            <div class="preview-off">
-              <Icon name="camOff" size={28} />
-              <span>Camera is off</span>
+      <div class={files ? "lobby-body lobby-files" : "lobby-body"}>
+        {!files && (
+          <div class="preview">
+            {video && stream ? (
+              <video
+                ref={videoEl}
+                class="mirror"
+                autoPlay
+                playsInline
+                muted
+                data-testid="lobby-preview"
+              />
+            ) : (
+              <div class="preview-off">
+                <Icon name="camOff" size={28} />
+                <span>Camera is off</span>
+              </div>
+            )}
+            <div class="preview-controls">
+              <button
+                type="button"
+                class={`control ${audio ? "control-on" : "control-off"}`}
+                aria-pressed={audio}
+                aria-label={audio ? "Microphone on" : "Microphone off"}
+                onClick={() => setAudio(!audio)}
+                data-testid="lobby-mic"
+              >
+                <Icon name={audio ? "mic" : "micOff"} size={22} />
+              </button>
+              <button
+                type="button"
+                class={`control ${video ? "control-on" : "control-off"}`}
+                aria-pressed={video}
+                aria-label={video ? "Camera on" : "Camera off"}
+                onClick={() => setVideo(!video)}
+                data-testid="lobby-cam"
+              >
+                <Icon name={video ? "cam" : "camOff"} size={22} />
+              </button>
             </div>
-          )}
-          <div class="preview-controls">
-            <button
-              type="button"
-              class={`control ${audio ? "control-on" : "control-off"}`}
-              aria-pressed={audio}
-              aria-label={audio ? "Microphone on" : "Microphone off"}
-              onClick={() => setAudio(!audio)}
-              data-testid="lobby-mic"
-            >
-              <Icon name={audio ? "mic" : "micOff"} size={22} />
-            </button>
-            <button
-              type="button"
-              class={`control ${video ? "control-on" : "control-off"}`}
-              aria-pressed={video}
-              aria-label={video ? "Camera on" : "Camera off"}
-              onClick={() => setVideo(!video)}
-              data-testid="lobby-cam"
-            >
-              <Icon name={video ? "cam" : "camOff"} size={22} />
-            </button>
           </div>
-        </div>
+        )}
 
         <form
           class="card stack lobby-form"
@@ -202,7 +207,11 @@ export function Lobby(props: {
           >
             {props.busy ? "Joining…" : "Join room"}
           </button>
-          <p class="hint center">You can turn your camera and microphone on later.</p>
+          <p class="hint center">
+            {files
+              ? "No camera or microphone here: you will see the files people send, and can send your own."
+              : "You can turn your camera and microphone on later."}
+          </p>
         </form>
       </div>
     </main>

@@ -1,13 +1,13 @@
 import type { JSX } from "preact";
 import { useState } from "preact/hooks";
-import { parseRoomLink } from "../../crypto/room";
+import { parseRoomLink, parseRoomMode, type RoomMode } from "../../crypto/room";
 import { Icon, Logo } from "../components/Icons";
 import { QrScanner } from "../components/QrScanner";
 import { Sheet } from "../components/Sheet";
 
 export function Home(props: {
-  onCreate: (passphrase: string) => void;
-  onJoin: (key: Uint8Array, passphrase: string) => void;
+  onCreate: (passphrase: string, mode: RoomMode) => void;
+  onJoin: (key: Uint8Array, passphrase: string, mode: RoomMode) => void;
   onSettings: () => void;
 }): JSX.Element {
   const [link, setLink] = useState("");
@@ -23,7 +23,7 @@ export function Home(props: {
       setError("That doesn't look like a Veil room link.");
       return;
     }
-    props.onJoin(key, passphrase);
+    props.onJoin(key, passphrase, parseRoomMode(value));
   };
 
   return (
@@ -47,15 +47,26 @@ export function Home(props: {
       </section>
 
       <section class="card home-card">
-        <button
-          type="button"
-          class="btn btn-primary btn-lg btn-block"
-          data-testid="new-room"
-          onClick={() => props.onCreate(passphrase)}
-        >
-          <Icon name="plus" size={20} />
-          New room
-        </button>
+        <div class="home-actions">
+          <button
+            type="button"
+            class="btn btn-primary btn-lg"
+            data-testid="new-room"
+            onClick={() => props.onCreate(passphrase, "call")}
+          >
+            <Icon name="plus" size={20} />
+            New room
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary btn-lg"
+            data-testid="send-files"
+            onClick={() => props.onCreate(passphrase, "files")}
+          >
+            <Icon name="attach" size={20} />
+            Send files
+          </button>
+        </div>
 
         <div class="divider">
           <span>or join one</span>

@@ -1,4 +1,6 @@
 import type { JSX } from "preact";
+import { useRef } from "preact/hooks";
+import type { RoomMode } from "../../crypto/room";
 import type { RoomSession } from "../session";
 import { Icon, type IconName } from "./Icons";
 
@@ -27,48 +29,86 @@ function Control(props: {
   );
 }
 
+export type SidePanel = "chat" | "files" | null;
+
 export function ControlBar(props: {
   session: RoomSession;
-  chatOpen: boolean;
-  onToggleChat: () => void;
+  mode: RoomMode;
+  side: SidePanel;
+  onSide: (side: SidePanel) => void;
   onLeave: () => void;
 }): JSX.Element {
   const s = props.session;
   const m = s.media;
   const canScreen = typeof navigator.mediaDevices?.getDisplayMedia === "function";
+  const input = useRef<HTMLInputElement>(null);
+  const toggle = (panel: Exclude<SidePanel, null>) =>
+    props.onSide(props.side === panel ? null : panel);
   return (
-    <nav class="controls" aria-label="Call controls">
-      <Control
-        icon={m.micOn ? "mic" : "micOff"}
-        label={m.micOn ? "Mute microphone" : "Unmute microphone"}
-        pressed={m.micOn}
-        tone={m.micOn ? "on" : "off"}
-        onClick={() => void s.toggleMic()}
-        testid="toggle-mic"
-      />
-      <Control
-        icon={m.camOn ? "cam" : "camOff"}
-        label={m.camOn ? "Turn camera off" : "Turn camera on"}
-        pressed={m.camOn}
-        tone={m.camOn ? "on" : "off"}
-        onClick={() => void s.toggleCam()}
-        testid="toggle-cam"
-      />
-      {canScreen && (
-        <Control
-          icon="screen"
-          label={m.screenOn ? "Stop sharing screen" : "Share screen"}
-          pressed={m.screenOn}
-          tone={m.screenOn ? "on" : undefined}
-          onClick={() => void s.toggleScreen()}
-        />
+    <nav class="controls" aria-label={props.mode === "files" ? "Room controls" : "Call controls"}>
+      {props.mode === "call" ? (
+        <>
+          <Control
+            icon={m.micOn ? "mic" : "micOff"}
+            label={m.micOn ? "Mute microphone" : "Unmute microphone"}
+            pressed={m.micOn}
+            tone={m.micOn ? "on" : "off"}
+            onClick={() => void s.toggleMic()}
+            testid="toggle-mic"
+          />
+          <Control
+            icon={m.camOn ? "cam" : "camOff"}
+            label={m.camOn ? "Turn camera off" : "Turn camera on"}
+            pressed={m.camOn}
+            tone={m.camOn ? "on" : "off"}
+            onClick={() => void s.toggleCam()}
+            testid="toggle-cam"
+          />
+          {canScreen && (
+            <Control
+              icon="screen"
+              label={m.screenOn ? "Stop sharing screen" : "Share screen"}
+              pressed={m.screenOn}
+              tone={m.screenOn ? "on" : undefined}
+              onClick={() => void s.toggleScreen()}
+            />
+          )}
+          <Control
+            icon="file"
+            label={props.side === "files" ? "Hide files" : "Show files"}
+            pressed={props.side === "files"}
+            badge={s.pendingFiles.value}
+            onClick={() => toggle("files")}
+            testid="toggle-files"
+          />
+        </>
+      ) : (
+        <>
+          <input
+            ref={input}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              const files = e.currentTarget.files;
+              if (files?.length) void s.offerFiles([...files]);
+              e.currentTarget.value = "";
+            }}
+          />
+          <Control
+            icon="attach"
+            label="Send files"
+            onClick={() => input.current?.click()}
+            testid="add-files"
+          />
+        </>
       )}
       <Control
         icon="chat"
-        label={props.chatOpen ? "Hide chat" : "Show chat"}
-        pressed={props.chatOpen}
+        label={props.side === "chat" ? "Hide chat" : "Show chat"}
+        pressed={props.side === "chat"}
         badge={s.unread.value}
-        onClick={props.onToggleChat}
+        onClick={() => toggle("chat")}
         testid="toggle-chat"
       />
       <Control

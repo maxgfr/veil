@@ -1631,3 +1631,143 @@ textarea.input {
   object-fit: cover;
   display: block;
 }
+
+/* ── files rooms ──────────────────────────────────────────────────────── */
+.home-actions {
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 420px) {
+  .home-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.lobby-files {
+  max-width: 480px;
+}
+
+@media (min-width: 860px) {
+  .lobby-files {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.files {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: var(--text);
+}
+
+.files-main {
+  flex: 1;
+  width: min(760px, 100%);
+  margin: 0 auto 12px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.files-side {
+  height: 100%;
+}
+
+.files-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+.dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 24px 16px;
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+  transition-property: border-color, background-color;
+  transition-duration: var(--fast);
+}
+
+.dropzone:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dropzone-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dropzone-title {
+  font-weight: 600;
+}
+
+.dropzone-hint {
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.files-alone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  font-size: 14px;
+}
+
+.files-empty {
+  padding: 8px 4px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-entry-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.file-entry .file-card {
+  width: 100%;
+}

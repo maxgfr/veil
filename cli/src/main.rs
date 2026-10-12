@@ -74,6 +74,9 @@ enum Command {
     New {
         #[arg(long, default_value = DEFAULT_BASE)]
         base: String,
+        /// A files room: the web app opens without camera or microphone.
+        #[arg(long)]
+        files: bool,
     },
 }
 
@@ -190,8 +193,8 @@ fn parse_link(link: &str) -> Result<[u8; 32]> {
     crypto::parse_room_link(link).context("not a Veil room link (expected …/veil/#<key>)")
 }
 
-fn announce_room(base: &str, key: &[u8; 32], has_passphrase: bool) {
-    let link = crypto::room_link(base, key);
+fn announce_room(base: &str, key: &[u8; 32], has_passphrase: bool, files: bool) {
+    let link = crypto::room_link(base, key, files);
     eprintln!("\nRoom link (share it; the key after # never reaches any server):\n\n  {link}\n");
     print_qr(&link);
     if has_passphrase {
@@ -252,8 +255,8 @@ fn main() {
 
 async fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::New { base } => {
-            println!("{}", crypto::room_link(&base, &crypto::new_room_key()));
+        Command::New { base, files } => {
+            println!("{}", crypto::room_link(&base, &crypto::new_room_key(), files));
             Ok(())
         }
         Command::Send { files, room, once, net } => send(files, room, once, net).await,
@@ -274,7 +277,8 @@ async fn send(paths: Vec<PathBuf>, room_link: Option<String>, once: bool, net: N
         None => crypto::new_room_key(),
     };
     let (room, mut events) = room::spawn(net.room_options(key));
-    announce_room(&net.base, &key, net.passphrase.is_some());
+    // A files room: recipients' browsers open the files interface directly.
+    announce_room(&net.base, &key, net.passphrase.is_some(), true);
     eprintln!("Waiting for someone to join… (Ctrl-C to stop)");
     // One listener for the whole session: a Ctrl-C between two iterations must not be lost.
     let stop = ctrl_c();
@@ -431,7 +435,7 @@ async fn chat(link: Option<String>, net: NetArgs) -> Result<()> {
     };
     let (room, mut events) = room::spawn(net.room_options(key));
     if link.is_none() {
-        announce_room(&net.base, &key, net.passphrase.is_some());
+        announce_room(&net.base, &key, net.passphrase.is_some(), false);
     }
     eprintln!("Type a message and press Enter. Ctrl-C to leave.");
     let mut names = Names(HashMap::new());
