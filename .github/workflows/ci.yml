@@ -80,7 +80,7 @@ jobs:
   e2e-webkit:
     # Playwright's Linux WebKit cannot establish WebRTC connections; Safari's engine is tested on macOS.
     name: End-to-end (WebKit, iPhone)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
