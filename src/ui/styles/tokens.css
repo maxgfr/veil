@@ -1,0 +1,91 @@
+/* Design tokens. Light by default, dark via prefers-color-scheme. */
+:root {
+  color-scheme: light dark;
+
+  --bg: oklch(0.972 0.006 85);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.955 0.007 85);
+  --surface-3: oklch(0.925 0.008 85);
+  --text: oklch(0.22 0.012 255);
+  --muted: oklch(0.5 0.012 255);
+  --faint: oklch(0.66 0.01 255);
+  --line: oklch(0.22 0.012 255 / 0.1);
+  --line-strong: oklch(0.22 0.012 255 / 0.18);
+
+  --accent: oklch(0.53 0.105 178);
+  --accent-hover: oklch(0.48 0.1 178);
+  --accent-soft: oklch(0.53 0.105 178 / 0.12);
+  --on-accent: oklch(0.99 0.005 178);
+  --ok: oklch(0.6 0.13 155);
+  --warn: oklch(0.7 0.14 70);
+  --warn-soft: oklch(0.7 0.14 70 / 0.14);
+  --danger: oklch(0.57 0.19 27);
+  --danger-soft: oklch(0.57 0.19 27 / 0.12);
+
+  --stage: oklch(0.2 0.01 255);
+  --tile: oklch(0.26 0.012 255);
+  --on-stage: oklch(0.96 0.004 255);
+
+  --shadow-sm: 0 1px 2px oklch(0.2 0.02 255 / 0.06), 0 0 0 1px oklch(0.2 0.02 255 / 0.06);
+  --shadow-md:
+    0 1px 2px oklch(0.2 0.02 255 / 0.05), 0 4px 12px oklch(0.2 0.02 255 / 0.07),
+    0 0 0 1px oklch(0.2 0.02 255 / 0.05);
+  --shadow-lg:
+    0 8px 28px oklch(0.2 0.02 255 / 0.14), 0 2px 6px oklch(0.2 0.02 255 / 0.06),
+    0 0 0 1px oklch(0.2 0.02 255 / 0.06);
+  --image-outline: oklch(0 0 0 / 0.1);
+  /* Lightness of per-member name colors, tuned for contrast on each theme. */
+  --name-l: 0.52;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --font:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --fast: 120ms;
+  --med: 200ms;
+
+  --tap: 44px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(0.165 0.008 255);
+    --surface: oklch(0.205 0.01 255);
+    --surface-2: oklch(0.235 0.011 255);
+    --surface-3: oklch(0.275 0.012 255);
+    --text: oklch(0.95 0.005 255);
+    --muted: oklch(0.72 0.01 255);
+    --faint: oklch(0.58 0.01 255);
+    --line: oklch(1 0 0 / 0.08);
+    --line-strong: oklch(1 0 0 / 0.15);
+
+    --accent: oklch(0.74 0.115 178);
+    --accent-hover: oklch(0.79 0.11 178);
+    --accent-soft: oklch(0.74 0.115 178 / 0.16);
+    --on-accent: oklch(0.2 0.03 178);
+    --ok: oklch(0.74 0.14 155);
+    --warn: oklch(0.8 0.13 75);
+    --danger: oklch(0.68 0.17 25);
+    --danger-soft: oklch(0.68 0.17 25 / 0.16);
+
+    --stage: oklch(0.13 0.008 255);
+    --tile: oklch(0.21 0.01 255);
+
+    --shadow-sm: 0 0 0 1px oklch(1 0 0 / 0.07);
+    --shadow-md: 0 0 0 1px oklch(1 0 0 / 0.08), 0 4px 14px oklch(0 0 0 / 0.35);
+    --shadow-lg: 0 0 0 1px oklch(1 0 0 / 0.09), 0 12px 32px oklch(0 0 0 / 0.5);
+    --image-outline: oklch(1 0 0 / 0.1);
+    --name-l: 0.78;
+  }
+}

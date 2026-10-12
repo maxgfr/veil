@@ -1,0 +1,37 @@
+{
+  "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "day": 20000,
+  "plain": {
+    "topic": "4091c044108ffc026c2d52e7130bf59614235c9813001a6cdd9e3c4a984d183d",
+    "sasSalt": "eaab61e5ddd1b28c297fe15f0855f538f808fb6f535000256cddf75ed0fdb1fe",
+    "bindKey": "36c1bc3e29892657beec31b2a298e79d99048ba95c65d0d7e90cc88f6969a975"
+  },
+  "passphrase": "correct horse",
+  "withPassphrase": {
+    "topic": "c8e0c1d547af78ea9e6d92a3f94853239b9b8504abb3ee14f9e853ff1d6a71fa",
+    "sasSalt": "cb87fee5c062e3ee8717119629ff11edb5db8dc84027d0270f0fd9f7bb07243e",
+    "bindKey": "bff0ebb6b79759b6d871f379703aea464eaf4eb25f2b41303c48c9e176280cae"
+  },
+  "envelope": {
+    "wire": "4b545a760117fb063471.h_NtWTZRgsCmMUE5ua7D7MezU5DWa9T4-YxGEV9lsMtcnw-OmziGevZt8j6Za2lB8NUh-Jv4Ea0zrMaDSGcT2msPZSFbNl0StPE-hxzfQ-rSREluo5lzznB0v57tULPOHdGuc7iwulZRStT7EI0UzARkgB35uepjgjSKcUqG7-6WVrI41awM7DdfvLEp3LvMM_CdOI4R8scCBN9wCRLSxdBRfsNpQaS-hlPR9KF1Ny4bF9UrtkbkmH0jNtV5g24Gvi-1LJESINFVjbEY7tga_xzUCiZCNCmW2s5fRVTf2qy2to84IKfFJ5blayNtT6bJjJQolYLTDJOF5Tutph-sFeKYZSm4GAdcqcUm-cHvuuidgt7qTJkoYV1MMvbONmLQL-dfaExzuGclEue-x5XTI6va67OvuEUMYq6aNxg2OnWYIejceA",
+    "ts": 1728000001234,
+    "from": "4b545a760117fb063471",
+    "sdp": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\na=fingerprint:sha-256 AA:BB:CC\r\n",
+    "to": "fedcba9876543210fedc",
+    "session": "sess"
+  },
+  "sas": {
+    "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "a": {
+      "peerId": "aaaaaaaaaaaaaaaaaaaa",
+      "edPub": "0101010101010101010101010101010101010101010101010101010101010101",
+      "fingerprint": "sha-256 AB:CD"
+    },
+    "b": {
+      "peerId": "bbbbbbbbbbbbbbbbbbbb",
+      "edPub": "0202020202020202020202020202020202020202020202020202020202020202",
+      "fingerprint": "sha-256 EF:01"
+    },
+    "names": ["Fish", "Globe", "Clock", "Umbrella"]
+  }
+}
