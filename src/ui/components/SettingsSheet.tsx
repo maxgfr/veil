@@ -1,5 +1,6 @@
 import type { JSX } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import type { RoomSession } from "../session";
 import {
   defaultSettings,
   parseUrlList,
@@ -8,6 +9,7 @@ import {
   saveSettings,
   settings,
 } from "../settings";
+import { DeviceSettings } from "./DeviceSettings";
 import { Sheet } from "./Sheet";
 
 function Toggle(props: {
@@ -39,6 +41,8 @@ export function SettingsSheet(props: {
   open: boolean;
   onClose: () => void;
   inRoom: boolean;
+  /** In a call: device changes apply to it right away. */
+  session?: RoomSession;
 }): JSX.Element {
   const [draft, setDraft] = useState<Settings>(settings.value);
   const [relays, setRelays] = useState("");
@@ -57,6 +61,9 @@ export function SettingsSheet(props: {
   const save = () => {
     saveSettings({
       ...draft,
+      // Devices are saved as soon as they are picked: never overwrite them with the draft.
+      audioDevice: settings.value.audioDevice,
+      videoDevice: settings.value.videoDevice,
       nostr: { ...draft.nostr, relays: parseUrlList(relays, ["wss://", "ws://"]) },
       torrent: { ...draft.torrent, trackers: parseUrlList(trackers, ["wss://", "ws://"]) },
       stun: parseUrlList(stun, ["stun:", "stuns:"]),
@@ -92,6 +99,8 @@ export function SettingsSheet(props: {
             onInput={(e) => setDraft({ ...draft, nick: e.currentTarget.value })}
           />
         </label>
+
+        <DeviceSettings open={props.open} session={props.session} />
 
         <fieldset class="group">
           <legend>How peers find each other</legend>

@@ -23,7 +23,7 @@ import type { AppMessage, MediaState } from "../mesh/protocol";
 import { type LinkInfo, type Member, Room } from "../mesh/room";
 import type { SignalConfig } from "../signal/mux";
 import type { TransportStatus } from "../signal/types";
-import { iceServers, type Settings } from "./settings";
+import { iceServers, type Settings, saveSettings, settings } from "./settings";
 
 export interface JoinParams {
   key: Uint8Array;
@@ -107,6 +107,16 @@ export class RoomSession {
       publish: (state) => room.setMedia(state),
       onChange: () => this.changed(),
       workerUrl: __E2EE_WORKER_URL__,
+      // Read live: a device chosen in Settings during the call applies to the next capture.
+      preferredDevices: () => ({
+        audio: settings.value.audioDevice,
+        video: settings.value.videoDevice,
+      }),
+      onDeviceFallback: (kind) =>
+        this.toast(
+          `The selected ${kind === "audio" ? "microphone" : "camera"} is unavailable: using the system default.`,
+          "warn",
+        ),
     });
   }
 
@@ -175,8 +185,6 @@ export class RoomSession {
         await session.media.start({
           audio: p.audio,
           video: p.video,
-          ...(s.audioDevice ? { audioDeviceId: s.audioDevice } : {}),
-          ...(s.videoDevice ? { videoDeviceId: s.videoDevice } : {}),
         });
       } catch (err) {
         session.toast(mediaError(err), "warn");
@@ -399,6 +407,15 @@ export class RoomSession {
         throw err;
       }
     });
+  }
+
+  /** Saves the chosen microphone or camera and switches to it now if it is in use. */
+  selectDevice(kind: "audio" | "video", deviceId: string): Promise<void> {
+    saveSettings({
+      ...settings.value,
+      [kind === "audio" ? "audioDevice" : "videoDevice"]: deviceId,
+    });
+    return this.queueMedia(() => this.media.switchDevice(kind));
   }
 
   hangUp(): void {

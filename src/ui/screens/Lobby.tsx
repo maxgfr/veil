@@ -1,5 +1,7 @@
 import type { JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { type DeviceInfo, listDevices, openDevices } from "../../features/devices";
+import { DeviceSelect, LevelMeter, useAudioLevel } from "../components/DeviceSettings";
 import { Icon } from "../components/Icons";
 import { saveSettings, settings } from "../settings";
 
@@ -22,7 +24,8 @@ export function Lobby(props: {
   const [audio, setAudio] = useState(false);
   const [video, setVideo] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [mics, setMics] = useState<DeviceInfo[]>([]);
+  const [cams, setCams] = useState<DeviceInfo[]>([]);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const videoEl = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -35,20 +38,23 @@ export function Lobby(props: {
     setStream(null);
     if (!audio && !video) return;
     const s = settings.value;
-    navigator.mediaDevices
-      .getUserMedia({
-        audio: audio ? (s.audioDevice ? { deviceId: { exact: s.audioDevice } } : true) : false,
-        video: video ? (s.videoDevice ? { deviceId: { exact: s.videoDevice } } : true) : false,
-      })
-      .then(async (st) => {
+    openDevices({
+      ...(audio ? { audio: s.audioDevice } : {}),
+      ...(video ? { video: s.videoDevice } : {}),
+    })
+      .then(async ({ stream: st, fellBack }) => {
         if (cancelled) {
           for (const t of st.getTracks()) t.stop();
           return;
         }
         streamRef.current = st;
         setStream(st);
-        setMediaError(null);
-        setDevices(await navigator.mediaDevices.enumerateDevices());
+        setMediaError(
+          fellBack.length ? "The selected device is unavailable: using the system default." : null,
+        );
+        const d = await listDevices();
+        setMics(d.mics);
+        setCams(d.cams);
       })
       .catch(() => {
         if (cancelled) return;
@@ -72,8 +78,7 @@ export function Lobby(props: {
     if (videoEl.current) videoEl.current.srcObject = stream;
   }, [stream]);
 
-  const cams = devices.filter((d) => d.kind === "videoinput" && d.deviceId);
-  const mics = devices.filter((d) => d.kind === "audioinput" && d.deviceId);
+  const level = useAudioLevel(audio ? stream : null);
 
   const submit = () => {
     const name = nick.trim().slice(0, 40);
@@ -152,46 +157,27 @@ export function Lobby(props: {
               onInput={(e) => setNick(e.currentTarget.value)}
             />
           </label>
-          {(cams.length > 1 || mics.length > 1) && (
+          {((audio && mics.length > 0) || (video && cams.length > 0)) && (
             <div class="row">
-              {mics.length > 1 && (
-                <label class="field">
-                  <span class="label">Microphone</span>
-                  <select
-                    class="input"
-                    value={settings.value.audioDevice}
-                    onChange={(e) =>
-                      saveSettings({ ...settings.value, audioDevice: e.currentTarget.value })
-                    }
-                  >
-                    {mics.map((d, i) => (
-                      <option key={d.deviceId} value={d.deviceId}>
-                        {d.label || `Microphone ${i + 1}`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              {audio && mics.length > 0 && (
+                <DeviceSelect
+                  kind="audio"
+                  devices={mics}
+                  value={settings.value.audioDevice}
+                  onChange={(id) => saveSettings({ ...settings.value, audioDevice: id })}
+                />
               )}
-              {cams.length > 1 && (
-                <label class="field">
-                  <span class="label">Camera</span>
-                  <select
-                    class="input"
-                    value={settings.value.videoDevice}
-                    onChange={(e) =>
-                      saveSettings({ ...settings.value, videoDevice: e.currentTarget.value })
-                    }
-                  >
-                    {cams.map((d, i) => (
-                      <option key={d.deviceId} value={d.deviceId}>
-                        {d.label || `Camera ${i + 1}`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              {video && cams.length > 0 && (
+                <DeviceSelect
+                  kind="video"
+                  devices={cams}
+                  value={settings.value.videoDevice}
+                  onChange={(id) => saveSettings({ ...settings.value, videoDevice: id })}
+                />
               )}
             </div>
           )}
+          {audio && stream && <LevelMeter level={level} label="Microphone input level" />}
           <label class="field">
             <span class="label">Room passphrase (if any)</span>
             <input

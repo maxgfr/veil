@@ -98,6 +98,8 @@ export function Room(props: {
       data-key-id={String(s.room.keys.keyId)}
       data-members={String(others.length)}
       data-links={String(s.room.readyIds().length)}
+      data-mic-device={s.media.activeDeviceId("audio")}
+      data-cam-device={s.media.activeDeviceId("video")}
     >
       <header class="room-head">
         <div class="room-id" title={`Room ${s.badgeNames.join(" · ")}`}>
@@ -234,7 +236,12 @@ export function Room(props: {
         hasPassphrase={!!s.params.passphrase}
         session={s}
       />
-      <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} inRoom />
+      <SettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        inRoom
+        session={s}
+      />
       <VerifySheet peerId={verify} session={s} onClose={() => setVerify(null)} />
       <Sheet open={people} onClose={() => setPeople(false)} title="People" testid="people-sheet">
         <PeopleList

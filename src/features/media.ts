@@ -15,6 +15,7 @@ import type { Peer } from "../mesh/peer";
 import type { CtrlMessage, MediaState } from "../mesh/protocol";
 import { trustedScriptUrl } from "../security";
 import type { WorkerMessage } from "../workers/e2ee-worker";
+import { type DeviceRequest, type MediaKind, openDevices } from "./devices";
 
 export type E2eeMode = "script" | "streams" | "none";
 
@@ -119,13 +120,15 @@ export interface MediaDeps {
   onChange(): void;
   workerUrl: string;
   mode?: E2eeMode;
+  /** The microphone and camera chosen in Settings ("" = system default), read at each use. */
+  preferredDevices(): { audio: string; video: string };
+  /** A chosen device could not be opened and the system default was used instead. */
+  onDeviceFallback?(kind: MediaKind): void;
 }
 
 export interface StartOptions {
   audio: boolean;
   video: boolean;
-  audioDeviceId?: string;
-  videoDeviceId?: string;
 }
 
 const SPEAKING_LEVEL = 0.04;
@@ -150,6 +153,7 @@ export class Media {
   private timers: ReturnType<typeof setInterval>[] = [];
   private audioCtx: AudioContext | null = null;
   private localAnalyser: AnalyserNode | null = null;
+  private localSource: MediaStreamAudioSourceNode | null = null;
 
   constructor(private readonly d: MediaDeps) {
     this.mode = d.mode ?? detectE2ee();
@@ -239,29 +243,19 @@ export class Media {
 
   // ── local media ───────────────────────────────────────────────────────────
 
+  /** Opens the chosen devices (falling back to the defaults if they are gone). */
+  private async open(want: DeviceRequest): Promise<MediaStream> {
+    const { stream, fellBack } = await openDevices(want);
+    for (const kind of fellBack) this.d.onDeviceFallback?.(kind);
+    return stream;
+  }
+
   async start(o: StartOptions): Promise<void> {
-    const constraints: MediaStreamConstraints = {
-      audio: o.audio
-        ? {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            ...(o.audioDeviceId ? { deviceId: { exact: o.audioDeviceId } } : {}),
-          }
-        : false,
-      video: o.video
-        ? {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30 },
-            ...(o.videoDeviceId ? { deviceId: { exact: o.videoDeviceId } } : {}),
-          }
-        : false,
-    };
-    const stream =
-      o.audio || o.video
-        ? await navigator.mediaDevices.getUserMedia(constraints)
-        : new MediaStream();
+    const pref = this.d.preferredDevices();
+    const want: DeviceRequest = {};
+    if (o.audio) want.audio = pref.audio;
+    if (o.video) want.video = pref.video;
+    const stream = o.audio || o.video ? await this.open(want) : new MediaStream();
     this.audioTrack = stream.getAudioTracks()[0] ?? null;
     this.cameraTrack = stream.getVideoTracks()[0] ?? null;
     this.micOn = !!this.audioTrack;
@@ -290,6 +284,7 @@ export class Media {
     void this.audioCtx?.close().catch(() => {});
     this.audioCtx = null;
     this.localAnalyser = null;
+    this.localSource = null;
     this.refreshPreview();
     this.d.publish(this.state());
     this.d.onChange();
@@ -297,9 +292,7 @@ export class Media {
 
   async setMic(on: boolean): Promise<void> {
     if (on && !this.audioTrack) {
-      const s = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
+      const s = await this.open({ audio: this.d.preferredDevices().audio });
       this.audioTrack = s.getAudioTracks()[0] ?? null;
       if (this.audioTrack) this.watchLocalLevel(this.audioTrack);
     }
@@ -311,17 +304,10 @@ export class Media {
     this.d.onChange();
   }
 
-  async setCam(on: boolean, deviceId?: string): Promise<void> {
+  async setCam(on: boolean): Promise<void> {
     if (on) {
-      if (!this.cameraTrack || deviceId) {
-        const s = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-          },
-        });
-        this.cameraTrack?.stop();
+      if (!this.cameraTrack) {
+        const s = await this.open({ video: this.d.preferredDevices().video });
         this.cameraTrack = s.getVideoTracks()[0] ?? null;
       }
     } else {
@@ -336,19 +322,38 @@ export class Media {
     this.d.onChange();
   }
 
-  async switchMic(deviceId: string): Promise<void> {
-    const s = await navigator.mediaDevices.getUserMedia({
-      audio: { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true },
-    });
-    const track = s.getAudioTracks()[0];
-    if (!track) return;
-    this.audioTrack?.stop();
-    this.audioTrack = track;
-    track.enabled = this.micOn;
-    this.watchLocalLevel(track);
-    for (const sd of this.senders.values())
-      void sd.audio.replaceTrack(this.micOn ? track : null).catch(() => {});
+  /**
+   * Applies a newly chosen device right away if it is in use: the new track
+   * replaces the old one on every link, without renegotiation.
+   */
+  async switchDevice(kind: MediaKind): Promise<void> {
+    const pref = this.d.preferredDevices();
+    if (kind === "audio") {
+      if (!this.audioTrack) return;
+      const track = (await this.open({ audio: pref.audio })).getAudioTracks()[0];
+      if (!track) return;
+      this.audioTrack.stop();
+      this.audioTrack = track;
+      track.enabled = this.micOn;
+      this.watchLocalLevel(track);
+      for (const sd of this.senders.values())
+        void sd.audio.replaceTrack(this.micOn ? track : null).catch(() => {});
+    } else {
+      if (!this.camOn || !this.cameraTrack) return;
+      const track = (await this.open({ video: pref.video })).getVideoTracks()[0];
+      if (!track) return;
+      this.cameraTrack.stop();
+      this.cameraTrack = track;
+      this.updateVideoSenders();
+      this.refreshPreview();
+    }
     this.d.onChange();
+  }
+
+  /** The device actually capturing, as the browser reports it (for display and tests). */
+  activeDeviceId(kind: MediaKind): string {
+    const track = kind === "audio" ? this.audioTrack : this.cameraTrack;
+    return track?.getSettings().deviceId ?? "";
   }
 
   async setScreen(on: boolean): Promise<void> {
@@ -388,10 +393,12 @@ export class Media {
   private watchLocalLevel(track: MediaStreamTrack): void {
     try {
       this.audioCtx ??= new AudioContext();
-      const src = this.audioCtx.createMediaStreamSource(new MediaStream([track]));
+      // One source at a time: a device switch must not leave the old one connected.
+      this.localSource?.disconnect();
+      this.localSource = this.audioCtx.createMediaStreamSource(new MediaStream([track]));
       this.localAnalyser = this.audioCtx.createAnalyser();
       this.localAnalyser.fftSize = 256;
-      src.connect(this.localAnalyser);
+      this.localSource.connect(this.localAnalyser);
     } catch {
       this.localAnalyser = null;
     }
