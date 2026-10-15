@@ -862,6 +862,11 @@ textarea.input {
   color: oklch(0.92 0.06 80);
 }
 
+.banner-bad {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .banner .btn-ghost {
   color: inherit;
 }
@@ -1454,6 +1459,58 @@ textarea.input {
   flex: 1;
 }
 
+.transports li.transport {
+  display: block;
+}
+
+.transport summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.transport summary span:nth-child(2) {
+  flex: 1;
+}
+
+.endpoints {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 8px;
+  padding: 0 0 0 18px;
+  list-style: none;
+  font-size: 13px;
+}
+
+.endpoints li {
+  min-height: 24px;
+  flex-wrap: wrap;
+}
+
+.endpoints li span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 10px;
+}
+
+.connection-summary .connection-label {
+  font-weight: 600;
+}
+
+.connection-summary .muted {
+  grid-column: 2;
+}
+
 .scanner {
   display: flex;
   flex-direction: column;
@@ -1538,6 +1595,13 @@ textarea.input {
   box-shadow: var(--shadow-lg);
   font-size: 14px;
   white-space: nowrap;
+}
+
+.update.offline {
+  gap: 8px;
+  padding: 8px 16px 8px 12px;
+  background: var(--danger);
+  color: white;
 }
 
 @media (max-width: 599px) {

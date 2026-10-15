@@ -32,7 +32,7 @@ test("two members chat end to end and see the same verification emojis", async (
   await expect(a.page.locator(".msg.mine .receipt .tabular")).toHaveText("1");
 
   const sas = async (page: typeof a.page) => {
-    await page.getByTestId("status").click();
+    await page.getByRole("button", { name: "People", exact: true }).click();
     await page.getByTestId("verify").first().click();
     const text = await page.getByTestId("sas").innerText();
     await page.keyboard.press("Escape");
