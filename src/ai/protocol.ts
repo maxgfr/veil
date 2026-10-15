@@ -1,7 +1,9 @@
 /**
  * Messages between the page (src/ai/engine.ts) and the AI worker
- * (src/workers/ai-worker.ts), plus the types the AI features share. The
- * channel carries only our own messages: anything else is ignored.
+ * (src/workers/ai-worker.ts), between the page (src/ai/speech.ts) and the
+ * speech worker (src/workers/speech-worker.ts), plus the types the AI
+ * features share. Each channel carries only our own messages: anything else
+ * is ignored.
  */
 
 export interface ChatMessage {
@@ -22,7 +24,7 @@ export interface ChatOptions {
 export interface LoadProgress {
   /** 0 to 1: download, then upload to the GPU. */
   progress: number;
-  /** WebLLM's own line, in English. */
+  /** The engine's own line, in English. */
   text: string;
 }
 
@@ -51,7 +53,6 @@ export type AiRequest =
       maxTokens?: number;
       temperature?: number;
     }
-  | { id: number; op: "transcribe"; pcm: Float32Array; lang?: string }
   | { id: number; op: "abort"; target: number }
   | { id: number; op: "cacheState"; modelId: string }
   | { id: number; op: "remove"; modelId: string };
@@ -68,7 +69,6 @@ const OPS: ReadonlySet<string> = new Set([
   "load",
   "unload",
   "chat",
-  "transcribe",
   "abort",
   "cacheState",
   "remove",
@@ -94,6 +94,56 @@ export function isResponse(d: unknown): d is AiResponse {
     typeof d.id === "number" &&
     "kind" in d &&
     KINDS.has(String(d.kind))
+  );
+}
+
+/** Requests to the speech worker: Whisper, through transformers.js. */
+export type SpeechRequest =
+  /** `download: false` loads from the cache only; a missing file then fails the load. */
+  | { id: number; op: "load"; modelId: string; download: boolean }
+  | { id: number; op: "unload" }
+  /** 16 kHz mono PCM; `language` is a Whisper code, else Whisper detects it. */
+  | { id: number; op: "transcribe"; pcm: Float32Array; language?: string }
+  | { id: number; op: "abort"; target: number }
+  | { id: number; op: "cacheState"; modelId: string }
+  | { id: number; op: "remove"; modelId: string };
+
+export type SpeechResponse =
+  | { id: number; kind: "progress"; progress: LoadProgress }
+  | { id: number; kind: "text"; text: string }
+  | { id: number; kind: "state"; state: ModelCacheState }
+  | { id: number; kind: "ok" }
+  | { id: number; kind: "error"; error: WireError };
+
+const SPEECH_OPS: ReadonlySet<string> = new Set([
+  "load",
+  "unload",
+  "transcribe",
+  "abort",
+  "cacheState",
+  "remove",
+]);
+const SPEECH_KINDS: ReadonlySet<string> = new Set(["progress", "text", "state", "ok", "error"]);
+
+export function isSpeechRequest(d: unknown): d is SpeechRequest {
+  return (
+    typeof d === "object" &&
+    d !== null &&
+    "id" in d &&
+    typeof d.id === "number" &&
+    "op" in d &&
+    SPEECH_OPS.has(String(d.op))
+  );
+}
+
+export function isSpeechResponse(d: unknown): d is SpeechResponse {
+  return (
+    typeof d === "object" &&
+    d !== null &&
+    "id" in d &&
+    typeof d.id === "number" &&
+    "kind" in d &&
+    SPEECH_KINDS.has(String(d.kind))
   );
 }
 

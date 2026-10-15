@@ -4,7 +4,7 @@ import { listBrowserModels } from "llm-models/browser";
 import { engineModelsSource, OUT } from "../../scripts/engine-models";
 import { type DeviceInfo, type GpuReport, modelFiles, NON_WEIGHT_ALLOWANCE_BYTES } from "./device";
 import { ENGINE_MODELS } from "./engineModels";
-import { audioModelFit, formatGb, isAudioModel, modelLabel, recommendLocal } from "./models";
+import { formatGb, modelLabel, recommendLocal } from "./models";
 
 const GiB = 1024 * 1024 * 1024;
 const GEMMA = "gemma-4-E2B-it-q4f16_1-MLC";
@@ -45,12 +45,6 @@ describe("engine models", () => {
 });
 
 describe("labels", () => {
-  test("isAudioModel is true for Gemma 4 E2B builds only", () => {
-    expect(isAudioModel(GEMMA)).toBe(true);
-    expect(isAudioModel("Qwen3.5-2B-q4f16_1-MLC")).toBe(false);
-    expect(isAudioModel("gemma-2-2b-it-q4f16_1-MLC")).toBe(false);
-  });
-
   test("human names", () => {
     expect(modelLabel(GEMMA)).toBe("Gemma 4 E2B");
     expect(modelLabel("Qwen3.5-2B-q4f16_1-MLC")).toBe("Qwen3.5-2B");
@@ -148,28 +142,5 @@ describe("zod config", () => {
   test("importing models.ts makes zod jitless (no `new Function` under Trusted Types)", () => {
     const g = globalThis as { __zod_globalConfig?: { jitless?: boolean } };
     expect(g.__zod_globalConfig?.jitless).toBe(true);
-  });
-});
-
-describe("audioModelFit", () => {
-  test("Gemma 4 E2B fits a device with room, even when another model ranks first", () => {
-    const d = device({ memoryBudgetMb: 8192 });
-    expect(recommendLocal(d).best?.id).not.toBe(GEMMA);
-    expect(audioModelFit(d)?.id).toBe(GEMMA);
-  });
-
-  test("too little GPU memory", () => {
-    expect(audioModelFit(device({ memoryBudgetMb: 2048 }))).toBeNull();
-  });
-
-  test("too little space", () => {
-    expect(audioModelFit(device({}, { estimate: { usage: 0, quota: 2.1e9 } }))).toBeNull();
-  });
-
-  test("no shader-f16: the q4f32 build, which needs more memory", () => {
-    expect(audioModelFit(device({ shaderF16: false }))?.id).toBe("gemma-4-E2B-it-q4f32_1-MLC");
-    // Enough for the q4f16 build (3388 MB), not for the q4f32 one (3863 MB).
-    expect(audioModelFit(device({ shaderF16: false, memoryBudgetMb: 3500 }))).toBeNull();
-    expect(audioModelFit(device({ memoryBudgetMb: 3500 }))?.id).toBe(GEMMA);
   });
 });

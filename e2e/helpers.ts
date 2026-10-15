@@ -218,10 +218,104 @@ export function fakeSpeechSaying(text: string): void {
 }
 
 /** Init script: merges `ai` into the stored settings (runs after `member`'s own). */
-export function aiSettings(ai: { model: string | null; translateChat: boolean }): void {
+export function aiSettings(ai: {
+  model: string | null;
+  translateChat: boolean;
+  speechModel?: string | null;
+}): void {
   const key = "veil.settings.v1";
   const s = JSON.parse(localStorage.getItem(key) ?? "{}");
-  localStorage.setItem(key, JSON.stringify({ ...s, ai: { modelTranscribe: false, ...ai } }));
+  localStorage.setItem(key, JSON.stringify({ ...s, ai: { speechModel: null, ...ai } }));
+}
+
+/** Init script: a browser that can't recognize speech on the device (no Web Speech at all). */
+export function noWebSpeech(): void {
+  const w = window as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+  delete w.SpeechRecognition;
+  delete w.webkitSpeechRecognition;
+}
+
+/**
+ * Init script: the microphone "speaks": a tone for 1.5 s, then 1 s of
+ * silence, over and over, in place of the fake device's audio.
+ */
+export function fakeMicSpeaking(): void {
+  const real = MediaDevices.prototype.getUserMedia;
+  MediaDevices.prototype.getUserMedia = async function (constraints) {
+    const stream = await real.call(this, constraints);
+    if (!constraints?.audio) return stream;
+    const ctx = new AudioContext();
+    const tone = ctx.createOscillator();
+    tone.frequency.value = 220;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    for (let t = 0; t < 300; t += 2.5) {
+      gain.gain.setValueAtTime(0.3, t);
+      gain.gain.setValueAtTime(0, t + 1.5);
+    }
+    const out = ctx.createMediaStreamDestination();
+    tone.connect(gain).connect(out);
+    tone.start();
+    void ctx.resume();
+    for (const t of stream.getAudioTracks()) {
+      stream.removeTrack(t);
+      t.stop();
+    }
+    for (const t of out.stream.getAudioTracks()) stream.addTrack(t);
+    return stream;
+  };
+}
+
+/**
+ * Init script: the speech worker (Whisper), faked. `cached` models are fully
+ * downloaded; a load with `download` caches its model after some progress, a
+ * load without it fails if the model isn't cached; every transcription is
+ * `text`. Each request is logged in `window.speechReqs`. Other workers are real.
+ */
+export function fakeSpeechWorker(o: { cached: string[]; text: string }): void {
+  interface Req {
+    id: number;
+    op: string;
+    modelId?: string;
+    download?: boolean;
+  }
+  const w = window as unknown as { speechReqs: Req[]; Worker: typeof Worker };
+  const Real = w.Worker;
+  const cached = new Set(o.cached);
+  w.speechReqs = [];
+  class FakeSpeechWorker extends EventTarget {
+    postMessage(req: Req): void {
+      w.speechReqs.push({ ...req });
+      const answer = (reply: Record<string, unknown>, ms = 0) =>
+        setTimeout(
+          () => this.dispatchEvent(new MessageEvent("message", { data: { id: req.id, ...reply } })),
+          ms,
+        );
+      const id = req.modelId ?? "";
+      if (req.op === "cacheState") {
+        const complete = cached.has(id);
+        answer({ kind: "state", state: { cached: complete, complete, bytes: complete ? 1 : 0 } });
+      } else if (req.op === "load" && req.download) {
+        answer({ kind: "progress", progress: { progress: 0.5, text: "40 MB of 80 MB" } }, 100);
+        cached.add(id);
+        answer({ kind: "ok" }, 600);
+      } else if (req.op === "load" && !cached.has(id)) {
+        answer({ kind: "error", error: { name: "Error", message: `${id} is not downloaded` } });
+      } else if (req.op === "transcribe") {
+        answer({ kind: "text", text: o.text }, 50);
+      } else {
+        if (req.op === "remove") cached.delete(id);
+        answer({ kind: "ok" });
+      }
+    }
+    terminate(): void {}
+  }
+  w.Worker = new Proxy(Real, {
+    construct(target, args: [string | URL, WorkerOptions?]) {
+      if (String(args[0]).includes("speech-worker")) return new FakeSpeechWorker();
+      return Reflect.construct(target, args);
+    },
+  });
 }
 
 /**

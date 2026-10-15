@@ -7,9 +7,8 @@
  * anything changes, and reads plain fields from here.
  */
 import { signal } from "@preact/signals";
-import { getAiEngine } from "../ai/engine";
-import { isAudioModel } from "../ai/modelIds";
-import { chosenModel, ensureModel } from "../ai/store";
+import { getSpeechEngine } from "../ai/speech";
+import { ensureSpeechModel } from "../ai/speechStore";
 import { sha256 } from "../crypto/bytes";
 import { SAS_EMOJIS, type Sas } from "../crypto/sas";
 import { AudioTranscriber } from "../features/audioCaptions";
@@ -619,21 +618,19 @@ export class RoomSession {
   }
 
   /**
-   * Captions from the on-device audio model, when allowed to transcribe: the chosen
-   * model is loaded if it is fully cached (never downloaded from here).
+   * Captions from the downloaded Whisper model, when the browser can't recognize
+   * speech on the device: it is loaded if fully cached (never downloaded from here).
    */
   private async audioCaptions(): Promise<CaptionSource | null> {
-    if (!settings.value.ai.modelTranscribe) return null;
-    const chosen = chosenModel();
-    if (!chosen || !isAudioModel(chosen)) return null;
+    if (!settings.value.ai.speechModel) return null;
     try {
-      if (!(await ensureModel())) return null;
+      if (!(await ensureSpeechModel())) return null;
     } catch (err) {
-      console.warn("AI model failed to load", err);
+      console.warn("speech model failed to load", err);
       return null;
     }
-    const engine = getAiEngine();
-    if (!engine.ready || !engine.modelId || !isAudioModel(engine.modelId)) return null;
+    const engine = getSpeechEngine();
+    if (!engine.ready) return null;
     return new AudioTranscriber({
       track: () => this.media.audioTrack,
       engine,

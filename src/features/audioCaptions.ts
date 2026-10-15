@@ -1,4 +1,4 @@
-// Captions from the on-device audio model: the microphone is cut into spoken
+// Captions from the on-device speech model (Whisper): the microphone is cut into spoken
 // segments here, and each segment is transcribed locally, never by an online service.
 
 import { trustedScriptUrl } from "../security";

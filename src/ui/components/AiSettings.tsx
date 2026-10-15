@@ -1,29 +1,46 @@
 /**
  * "AI on this device": the browser's built-in models, the on-device model
- * (size, memory, why), its download, and the AI options. Loaded lazily by the
- * Settings sheet; detection runs the first time it is shown. Nothing
- * downloads without a click, and the size is always shown first.
+ * (size, memory, why), the Whisper model for speech, their downloads, the AI
+ * options, and deleting it all. Loaded lazily by the Settings sheet; detection runs the first
+ * time it is shown. Nothing downloads without a click, and the size is always
+ * shown first.
  */
 import type { JSX } from "preact";
-import { useEffect } from "preact/hooks";
-import type { Availability } from "../../ai/builtin";
-import { formatGb, isAudioModel, type ModelChoice, type Recommendation } from "../../ai/models";
+import { useEffect, useState } from "preact/hooks";
+import { formatGb, type ModelChoice, type Recommendation } from "../../ai/models";
+import { formatMb, type SpeechChoice } from "../../ai/speechModels";
 import {
-  aiAudioFit,
+  cancelSpeechLoad,
+  loadSpeechModel,
+  removeSpeechModel,
+  selectSpeechModel,
+  speechCache,
+  speechError,
+  speechModelId,
+  speechProgress,
+  speechRecommendation,
+  speechStatus,
+} from "../../ai/speechStore";
+import {
   aiBuiltin,
   aiBuiltinProgress,
   aiCache,
+  aiDataBytes,
   aiDetecting,
   aiError,
   aiModelId,
   aiProgress,
   aiRecommendation,
   aiStatus,
+  aiWipe,
   type BuiltinName,
+  type BuiltinState,
   cancelLoad,
+  deleteAllAiData,
   detectAi,
   downloadBuiltin,
   loadModel,
+  recheckBuiltin,
   refreshCache,
   removeModel,
   selectModel,
@@ -45,12 +62,17 @@ const BUILTIN: { name: BuiltinName; label: string }[] = [
   { name: "languageDetector", label: "Language detection" },
 ];
 
-const AVAILABILITY: Record<Availability, string> = {
+const AVAILABILITY: Record<BuiltinState, string> = {
   available: "Ready",
   downloadable: "Downloads on first use",
   downloading: "Downloading…",
   unavailable: "Not available",
+  unknown: "Couldn't check",
 };
+
+const SUMMARIZER_HINT =
+  "Chrome needs its Gemini Nano model for this, which requires lots of free disk space. " +
+  "Meeting notes still work with a downloaded model.";
 
 function Progress(props: { pct: number }): JSX.Element {
   return (
@@ -78,14 +100,15 @@ function BuiltinList(): JSX.Element {
         <ul class="ai-builtin" data-testid="ai-builtin">
           {BUILTIN.map(({ name, label }) => {
             const loaded = progress[name];
+            const state = found[name];
             return (
-              <li key={name}>
+              <li key={name} data-testid={`ai-builtin-${name}`}>
                 <span>{label}</span>
                 {loaded !== undefined ? (
                   <span class="ai-builtin-progress">
                     <Progress pct={loaded * 100} />
                   </span>
-                ) : found[name] === "downloadable" ? (
+                ) : state === "downloadable" ? (
                   <button
                     type="button"
                     class="btn btn-secondary btn-sm"
@@ -94,14 +117,30 @@ function BuiltinList(): JSX.Element {
                     <Icon name="download" size={16} />
                     Download
                   </button>
+                ) : state === "unknown" ? (
+                  <span class="row">
+                    <span class="muted small" data-testid="ai-builtin-status">
+                      {AVAILABILITY.unknown}
+                    </span>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm"
+                      onClick={() => void recheckBuiltin()}
+                    >
+                      Retry
+                    </button>
+                  </span>
                 ) : (
-                  <span class="muted small">{AVAILABILITY[found[name]]}</span>
+                  <span class="muted small" data-testid="ai-builtin-status">
+                    {AVAILABILITY[state]}
+                  </span>
                 )}
               </li>
             );
           })}
         </ul>
       )}
+      {found?.summarizer === "unavailable" && <p class="muted small">{SUMMARIZER_HINT}</p>}
     </div>
   );
 }
@@ -224,38 +263,181 @@ function use(id: string): void {
   void refreshCache(id);
 }
 
-function Transcription(props: { chosen: ModelChoice | null }): JSX.Element {
-  const ai = settings.value.ai;
-  const { chosen } = props;
-  const audioOk = chosen !== null && isAudioModel(chosen.id);
-  // Checked on its own: Gemma may fit even when other models rank above it.
-  const audioFits = aiAudioFit.value;
-  return (
-    <>
-      <Toggle
-        label="Transcribe with Gemma"
-        hint="On-device transcription for captions and recordings. Running it during a call may slow video."
-        checked={ai.modelTranscribe}
-        testid="toggle-model-transcribe"
-        onChange={(v) => saveSettings({ ...settings.value, ai: { ...ai, modelTranscribe: v } })}
-      />
-      {ai.modelTranscribe && !audioOk && (
+/** Download, resume, cancel or delete one Whisper model; a downloaded one is used, or can be. */
+function SpeechActions(props: { choice: SpeechChoice }): JSX.Element {
+  const { choice } = props;
+  const mine = speechModelId.value === choice.id;
+  const cache = speechCache.value[choice.id];
+  const progress = speechProgress.value;
+  if (mine && speechStatus.value === "loading") {
+    return (
+      <div class="stack-sm ai-grow">
+        <Progress pct={(progress?.progress ?? 0) * 100} />
         <div class="row row-between">
-          <span class="small">Requires Gemma 4 E2B</span>
-          {audioFits ? (
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              onClick={() => use(audioFits.id)}
-            >
-              Use {audioFits.label} ({formatGb(audioFits.downloadBytes)})
-            </button>
-          ) : (
-            <span class="muted small">It doesn't fit on this device.</span>
-          )}
+          <span class="muted small tabular">{progress?.text || "Starting…"}</span>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            onClick={() => void cancelSpeechLoad()}
+          >
+            Cancel
+          </button>
         </div>
+      </div>
+    );
+  }
+  const remove = cache?.cached && (
+    <button
+      type="button"
+      class="btn btn-ghost btn-sm"
+      data-testid="speech-delete"
+      onClick={() => void removeSpeechModel(choice.id)}
+    >
+      Delete
+    </button>
+  );
+  if (cache?.complete) {
+    return (
+      <div class="row row-between">
+        {settings.value.ai.speechModel === choice.id ? (
+          <span class="small" data-testid="speech-in-use">
+            <Icon name="check" size={16} /> Downloaded, in use
+          </span>
+        ) : (
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            onClick={() => selectSpeechModel(choice.id)}
+          >
+            Use
+          </button>
+        )}
+        {remove}
+      </div>
+    );
+  }
+  return (
+    <div class="row row-between">
+      <button
+        type="button"
+        class="btn btn-primary btn-sm"
+        data-testid="speech-download"
+        // One download at a time: the others wait for it to end (or its Cancel).
+        disabled={!choice.runs || !choice.fits || speechStatus.value === "loading"}
+        onClick={() => void loadSpeechModel(choice.id)}
+      >
+        <Icon name="download" size={16} />
+        {cache?.cached ? "Resume download" : "Download"}
+      </button>
+      {remove}
+    </div>
+  );
+}
+
+/**
+ * Whisper, for captions and recordings when the browser can't recognize speech
+ * on the device: the model in use (else the one recommended), the others below.
+ */
+function SpeechModels(): JSX.Element {
+  const rec = speechRecommendation.value;
+  const all = rec ? [rec.pick, ...rec.others] : [];
+  const main = all.find((c) => c.id === settings.value.ai.speechModel) ?? rec?.pick;
+  const others = all.filter((c) => c !== main);
+  return (
+    <div class="stack-sm" data-testid="speech-settings">
+      <span class="label">Speech recognition</span>
+      <p class="muted small">
+        Used for captions and recordings when this browser can't recognize speech on the device.
+        Running it during a call may slow video.
+      </p>
+      {!main ? (
+        <p class="muted small">Checking…</p>
+      ) : (
+        <>
+          <div class="ai-model" data-testid="speech-model">
+            <div class="ai-model-head">
+              <Icon name="captions" size={20} />
+              <span class="file-name">{main.label}</span>
+            </div>
+            <div class="file-meta">
+              <span class="tabular">{formatMb(main.downloadBytes)} download</span>
+              <span>{main.reason}</span>
+            </div>
+            <SpeechActions choice={main} />
+          </div>
+          <details class="ai-alternatives">
+            <summary>Other Whisper models</summary>
+            <ul>
+              {others.map((c) => (
+                <li key={c.id}>
+                  <span class="file-meta">
+                    <span class="file-name">{c.label}</span>
+                    <span class="tabular">{formatMb(c.downloadBytes)} download</span>
+                    <span>{c.reason}</span>
+                  </span>
+                  <SpeechActions choice={c} />
+                </li>
+              ))}
+            </ul>
+          </details>
+        </>
       )}
-    </>
+      {speechError.value && (
+        <p class="error" role="alert">
+          {speechError.value}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** "Delete all AI data", in two steps: the button, then a confirmation with the size freed. */
+function DeleteAll(): JSX.Element {
+  const [confirming, setConfirming] = useState(false);
+  const bytes = aiDataBytes.value;
+  const size = bytes >= 1e9 ? formatGb(bytes) : formatMb(bytes);
+  const { busy, error } = aiWipe.value;
+  return (
+    <div class="stack-sm" data-testid="ai-delete-all">
+      {confirming ? (
+        <div class="row">
+          <button
+            type="button"
+            class="btn btn-danger-ghost btn-sm"
+            data-testid="ai-delete-all-confirm"
+            disabled={busy}
+            onClick={() => {
+              setConfirming(false);
+              void deleteAllAiData();
+            }}
+          >
+            Confirm — free {size}
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          class="btn btn-danger-ghost btn-sm"
+          data-testid="ai-delete-all-button"
+          disabled={busy}
+          onClick={() => setConfirming(true)}
+        >
+          {busy ? "Deleting…" : `Delete all AI data (${size})`}
+        </button>
+      )}
+      <p class="muted small">
+        Chrome's built-in models (Summarizer, Translator, Language detection) are managed by Chrome
+        itself, at chrome://on-device-internals.
+      </p>
+      {error && (
+        <p class="error" role="alert" data-testid="ai-delete-all-error">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -269,14 +451,12 @@ function LocalModel(props: { rec: Recommendation }): JSX.Element | null {
       </p>
     );
   }
-  const all = [rec.fits, rec.best, ...rec.alternatives, aiAudioFit.value].filter(
-    (m): m is ModelChoice => !!m,
-  );
+  const all = [rec.fits, rec.best, ...rec.alternatives].filter((m): m is ModelChoice => !!m);
   const picked = settings.value.ai.model;
   // Nothing picked: the best model for the device, and an offer below if it doesn't fit.
   const model = all.find((m) => m.id === picked) ?? rec.best ?? rec.fits;
   if (!model) return null;
-  const fitting = [rec.fits, ...rec.alternatives, aiAudioFit.value].some((m) => m?.id === model.id);
+  const fitting = [rec.fits, ...rec.alternatives].some((m) => m?.id === model.id);
   const alternatives = [rec.fits, ...rec.alternatives]
     .filter((m): m is ModelChoice => !!m && m.id !== model.id)
     .slice(0, 3);
@@ -334,8 +514,6 @@ export function AiSettings(): JSX.Element {
   }, []);
   const rec = aiRecommendation.value;
   const ai = settings.value.ai;
-  const all = rec ? [rec.fits, rec.best, ...rec.alternatives, aiAudioFit.value] : [];
-  const chosen = all.find((m) => m?.id === (ai.model ?? rec?.best?.id)) ?? null;
   return (
     <fieldset class="group" id="ai-settings" data-testid="ai-settings">
       <legend>AI on this device</legend>
@@ -360,7 +538,8 @@ export function AiSettings(): JSX.Element {
         testid="toggle-translate-chat"
         onChange={(v) => saveSettings({ ...settings.value, ai: { ...ai, translateChat: v } })}
       />
-      {rec && !rec.unsupported && <Transcription chosen={chosen} />}
+      <SpeechModels />
+      <DeleteAll />
     </fieldset>
   );
 }

@@ -7,8 +7,8 @@
  * reference to an external origin.
  */
 import { createHash } from "node:crypto";
-import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { copyFile, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
 
@@ -54,6 +54,54 @@ export interface BuildResult {
   files: string[];
   /** The AI worker, relative to outdir (not precached). */
   aiWorker: string;
+  /** The speech worker, relative to outdir (not precached). */
+  speechWorker: string;
+  /** ONNX Runtime's files for the speech worker, relative to outdir (not precached). */
+  ortFiles: string[];
+}
+
+/**
+ * ONNX Runtime Web's runtime as transformers.js picks it: the asyncify build,
+ * or the plain one on Safari before 26 without WebGPU. Served from this origin.
+ */
+export const ORT_RUNTIME = [
+  "ort-wasm-simd-threaded.asyncify.mjs",
+  "ort-wasm-simd-threaded.asyncify.wasm",
+  "ort-wasm-simd-threaded.mjs",
+  "ort-wasm-simd-threaded.wasm",
+] as const;
+
+/**
+ * Copies ONNX Runtime's files into assets/ under content-hashed names and
+ * returns npm name → file name. They must be the build transformers.js bundles.
+ */
+async function copyOrt(outdir: string): Promise<Record<string, string>> {
+  const transformers = dirname(Bun.resolveSync("@huggingface/transformers/package.json", ROOT));
+  const deps = (
+    JSON.parse(await readFile(join(transformers, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    }
+  ).dependencies;
+  const ortPkg = Bun.resolveSync("onnxruntime-web/package.json", transformers);
+  const { version } = JSON.parse(await readFile(ortPkg, "utf8")) as { version: string };
+  if (version !== deps["onnxruntime-web"])
+    fail(
+      `onnxruntime-web ${version} is installed, transformers.js wants ${deps["onnxruntime-web"]}`,
+    );
+  await mkdir(join(outdir, "assets"), { recursive: true });
+  const out: Record<string, string> = {};
+  for (const name of ORT_RUNTIME) {
+    const src = join(dirname(ortPkg), "dist", name);
+    const hash = createHash("sha256")
+      .update(await readFile(src))
+      .digest("hex")
+      .slice(0, 8);
+    const dot = name.lastIndexOf(".");
+    const file = `${name.slice(0, dot)}-${hash}${name.slice(dot)}`;
+    await copyFile(src, join(outdir, "assets", file));
+    out[name] = file;
+  }
+  return out;
 }
 
 function fail(msg: string): never {
@@ -134,6 +182,25 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     aiWorker.outputs.find((o) => o.kind === "entry-point") ?? fail("no AI worker output");
   const aiWorkerUrl = `./${relative(outdir, aiWorkerOut.path).split("\\").join("/")}`;
 
+  // The speech worker carries transformers.js and ONNX Runtime's JavaScript, and
+  // the runtime's WebAssembly sits next to it: like the AI worker, never
+  // precached, the service worker caches them on first use.
+  const ort = await copyOrt(outdir);
+  const speechWorker = await Bun.build({
+    entrypoints: [join(ROOT, "src/workers/speech-worker.ts")],
+    outdir,
+    minify,
+    target: "browser",
+    format: "esm",
+    naming: { entry: "assets/[name]-[hash].[ext]" },
+    define: { __ORT_FILES__: JSON.stringify(ort) },
+  });
+  assertOk(speechWorker, "speech worker build");
+  const speechWorkerOut =
+    speechWorker.outputs.find((o) => o.kind === "entry-point") ?? fail("no speech worker output");
+  const speechWorkerUrl = `./${relative(outdir, speechWorkerOut.path).split("\\").join("/")}`;
+  const ortUrls = Object.values(ort).map((f) => `./assets/${f}`);
+
   // The PCM AudioWorklet (on-device transcription) loads from the same origin.
   const pcmWorklet = await Bun.build({
     entrypoints: [join(ROOT, "src/workers/pcm-worklet.ts")],
@@ -160,6 +227,7 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     define: {
       __E2EE_WORKER_URL__: JSON.stringify(workerUrl),
       __AI_WORKER_URL__: JSON.stringify(aiWorkerUrl),
+      __SPEECH_WORKER_URL__: JSON.stringify(speechWorkerUrl),
       __PCM_WORKLET_URL__: JSON.stringify(pcmWorkletUrl),
       "process.env.NODE_ENV": JSON.stringify(minify ? "production" : "development"),
     },
@@ -186,6 +254,7 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     hash.update(await readFile(join(outdir, f)));
   }
   const version = hash.digest("hex").slice(0, 16);
+  const onFirstUse = new Set([aiWorkerUrl, speechWorkerUrl, ...ortUrls]);
   const sw = await Bun.build({
     entrypoints: [join(ROOT, "src/sw.ts")],
     outdir,
@@ -197,14 +266,23 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
       __SW_VERSION__: JSON.stringify(version),
       __PRECACHE__: JSON.stringify([
         "./",
-        ...files.map((f) => `./${f}`).filter((f) => f !== aiWorkerUrl),
+        ...files.map((f) => `./${f}`).filter((f) => !onFirstUse.has(f)),
       ]),
       __AI_WORKER_URL__: JSON.stringify(aiWorkerUrl),
+      __SPEECH_WORKER_URL__: JSON.stringify(speechWorkerUrl),
+      __ORT_URLS__: JSON.stringify(ortUrls),
     },
   });
   assertOk(sw, "service worker build");
 
-  return { outdir, version, files: [...files, "sw.js"], aiWorker: aiWorkerUrl.slice(2) };
+  return {
+    outdir,
+    version,
+    files: [...files, "sw.js"],
+    aiWorker: aiWorkerUrl.slice(2),
+    speechWorker: speechWorkerUrl.slice(2),
+    ortFiles: ortUrls.map((u) => u.slice(2)),
+  };
 }
 
 if (import.meta.main) {
