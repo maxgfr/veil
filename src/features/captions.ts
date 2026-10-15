@@ -58,6 +58,8 @@ export class Transcriber {
       Recognition: RecognitionConstructor | undefined;
       lang: string;
       send(caption: Caption): void;
+      /** True while the browser downloads the language's recognition, then false. */
+      onInstalling?: (installing: boolean) => void;
       now?: () => number;
     },
   ) {}
@@ -102,7 +104,12 @@ export class Transcriber {
       const status = await Recognition.available(options);
       if (status === "available") return true;
       if (status === "unavailable" || !Recognition.install) return false;
-      return await Recognition.install(options);
+      this.deps.onInstalling?.(true);
+      try {
+        return await Recognition.install(options);
+      } finally {
+        this.deps.onInstalling?.(false);
+      }
     } catch {
       // A failed probe means no local model: online recognition is never an option.
       return false;

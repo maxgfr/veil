@@ -83,6 +83,7 @@ function LanguagePicker(): JSX.Element {
     <label class="field">
       <span class="label">Language</span>
       <select
+        class="input"
         data-testid="language-select"
         value={picked}
         onChange={(e) => {

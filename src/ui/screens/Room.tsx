@@ -270,47 +270,25 @@ export function Room(props: {
       <main class="stage">
         {files ? (
           <FilesPanel session={s} variant="main" onInvite={() => setShare(true)} />
-        ) : inCall ? (
+        ) : inCall || others.length > 0 ? (
+          // Everyone in the room is on the stage, microphone and camera on or not.
           <Stage session={s} members={members} pinned={pinned} onPin={setPinned} />
         ) : (
           <div class="empty-stage">
-            {others.length === 0 ? (
-              <>
-                <div class="pulse" aria-hidden="true">
-                  <Icon name="wifi" size={28} />
-                </div>
-                <h2>Waiting for others to join</h2>
-                <p class="muted">
-                  Share the link. People who open it connect to you directly.
-                  {online.length === 0 &&
-                    s.transports.length > 0 &&
-                    " Still reaching the rendezvous relays…"}
-                </p>
-                <button type="button" class="btn btn-primary" onClick={() => setShare(true)}>
-                  <Icon name="share" size={18} />
-                  Invite people
-                </button>
-              </>
-            ) : (
-              <>
-                <ul class="avatars" aria-label="People in the room">
-                  {members.slice(0, 8).map((m) => (
-                    <li
-                      key={m.peerId}
-                      class="avatar"
-                      style={{ "--hue": String(hueOf(m.peerId)) }}
-                      title={m.nick}
-                    >
-                      {initials(m.nick)}
-                    </li>
-                  ))}
-                </ul>
-                <h2>No one is on a call</h2>
-                <p class="muted">
-                  Turn on your microphone or camera to start one. You can keep chatting either way.
-                </p>
-              </>
-            )}
+            <div class="pulse" aria-hidden="true">
+              <Icon name="wifi" size={28} />
+            </div>
+            <h2>Waiting for others to join</h2>
+            <p class="muted">
+              Share the link. People who open it connect to you directly.
+              {online.length === 0 &&
+                s.transports.length > 0 &&
+                " Still reaching the rendezvous relays…"}
+            </p>
+            <button type="button" class="btn btn-primary" onClick={() => setShare(true)}>
+              <Icon name="share" size={18} />
+              Invite people
+            </button>
           </div>
         )}
         {!files && (

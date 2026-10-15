@@ -98,6 +98,8 @@ export class RoomSession {
   readonly captionsOn = signal(false);
   /** The last captions said in the room, oldest first. */
   readonly liveCaptions = signal<LiveCaption[]>([]);
+  /** The browser is downloading the recognition for our language: captions wait for it. */
+  readonly captionsInstalling = signal(false);
   /** Who (by peer id, us included) said their device can't caption them, until it does. */
   readonly captionsUnavailable = signal<ReadonlySet<string>>(new Set());
   chatOpen = false;
@@ -178,6 +180,9 @@ export class RoomSession {
         return speechLang();
       },
       send: (caption) => this.onOwnCaption(caption),
+      onInstalling: (installing) => {
+        this.captionsInstalling.value = installing;
+      },
     });
     let language = settings.value.language;
     this.stopLanguageWatch = effect(() => {

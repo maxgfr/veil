@@ -60,3 +60,29 @@ test("someone who joins a call with mic and camera off still gets a tile", async
   await a.ctx.close();
   await b.ctx.close();
 });
+
+test("with nobody's microphone or camera on, everyone in the room is on the stage", async ({
+  browser,
+}) => {
+  const a = await member(browser);
+  const b = await member(browser);
+  const link = await createRoom(a, "Ada");
+  // Alone: an invitation, not an empty stage.
+  await expect(a.page.getByText("Waiting for others to join")).toBeVisible();
+  await joinRoom(b, link, "Bob");
+  await closeSheets(b.page);
+  await waitMembers(a.page, 1);
+
+  for (const [p, other] of [
+    [a.page, "Bob"],
+    [b.page, "Ada"],
+  ] as const) {
+    await expect(p.getByTestId("tile-self")).toBeVisible();
+    await expect(p.getByTestId("tile-remote")).toContainText(other);
+    await expect(p.getByText("No one is on a call")).toHaveCount(0);
+  }
+  expect(a.errors).toEqual([]);
+  expect(b.errors).toEqual([]);
+  await a.ctx.close();
+  await b.ctx.close();
+});
