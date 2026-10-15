@@ -16,13 +16,15 @@ function fakeGum(fail?: (c: MediaStreamConstraints) => string | null) {
 
 function exactOf(c: MediaStreamConstraints, kind: "audio" | "video") {
   const v = c[kind];
-  return typeof v === "object" ? v.deviceId : undefined;
+  // The default is asked as an ideal ("default"): only an exact device can be missing.
+  return typeof v === "object" && typeof v.deviceId === "object" ? v.deviceId : undefined;
 }
 
 describe("devices", () => {
   test("the chosen device is requested exactly; the default is not pinned", () => {
     expect(constraintsFor("audio", "mic-2").deviceId).toEqual({ exact: "mic-2" });
-    expect(constraintsFor("audio", "").deviceId).toBeUndefined();
+    expect(constraintsFor("audio", "").deviceId).toBe("default");
+    expect(constraintsFor("video", "").deviceId).toBeUndefined();
     expect(constraintsFor("video", "cam-1").deviceId).toEqual({ exact: "cam-1" });
   });
 
