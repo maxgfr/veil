@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { baseLang, languageName, myLang, speechLang } from "./language";
+import { baseLang, languageName, myLang } from "./language";
 import { defaultSettings, settings } from "./settings";
 
 afterEach(() => {
@@ -9,9 +9,8 @@ afterEach(() => {
 describe("language", () => {
   test("follows the browser until one is picked", () => {
     settings.value = { ...defaultSettings(), language: "" };
-    expect(speechLang()).toBe(navigator.language || "en-US");
+    expect(myLang()).toBe(baseLang(navigator.language || "en-US"));
     settings.value = { ...defaultSettings(), language: "ja-JP" };
-    expect(speechLang()).toBe("ja-JP");
     expect(myLang()).toBe("ja");
   });
 

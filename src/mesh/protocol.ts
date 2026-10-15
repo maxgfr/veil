@@ -111,8 +111,6 @@ export interface MediaState {
   screen: boolean;
   /** The author is recording the call locally. */
   recording?: boolean;
-  /** The author has live captions on (everyone shows a CC badge). */
-  captions?: boolean;
   /** The msid of the author's screen-share stream, while sharing on its own track. */
   screenStream?: string;
 }
@@ -137,11 +135,6 @@ export interface Presence {
 /** A short lowercase capability name ("screen-track"). */
 const isCap = (v: unknown): v is string => isStr(v, 24) && /^[a-z0-9-]+$/.test(v);
 
-/** A BCP-47-shaped language tag ("en", "pt-BR"), at most 35 characters. */
-function isLangTag(v: unknown): v is string {
-  return typeof v === "string" && v.length <= 35 && /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/.test(v);
-}
-
 export function decodePresence(x: unknown): Presence | null {
   if (!isObj(x) || !isStr(x.nick, 64) || !isB64(x.xPub, 64) || !isInt(x.joinedAt)) return null;
   const m = x.media;
@@ -164,10 +157,6 @@ export function decodePresence(x: unknown): Presence | null {
   if (m.recording !== undefined) {
     if (typeof m.recording !== "boolean") return null;
     out.media.recording = m.recording;
-  }
-  if (m.captions !== undefined) {
-    if (typeof m.captions !== "boolean") return null;
-    out.media.captions = m.captions;
   }
   if (m.screenStream !== undefined) {
     if (!isId(m.screenStream)) return null;
@@ -247,12 +236,9 @@ export type AppMessage =
   | { type: "typing"; on: boolean }
   | { type: "receipt"; ids: string[] }
   | { type: "file-offer"; id: string; name: string; size: number; mime: string }
-  | { type: "file-cancel"; id: string }
-  /** A live caption line; `unavailable` says the author cannot caption (text is then empty). */
-  | { type: "caption"; ts: number; text: string; lang?: string; unavailable?: true };
+  | { type: "file-cancel"; id: string };
 
 export const MAX_CHAT_LENGTH = 8000;
-export const MAX_CAPTION_LENGTH = 500;
 
 export function decodeApp(x: unknown): AppMessage | null {
   if (!isObj(x)) return null;
@@ -273,17 +259,6 @@ export function decodeApp(x: unknown): AppMessage | null {
         : null;
     case "file-cancel":
       return isId(x.id) ? { type: "file-cancel", id: x.id } : null;
-    case "caption": {
-      if (!isInt(x.ts) || !isStr(x.text, MAX_CAPTION_LENGTH)) return null;
-      if (x.lang !== undefined && !isLangTag(x.lang)) return null;
-      const lang = x.lang === undefined ? {} : { lang: x.lang };
-      if (x.unavailable === undefined) {
-        return x.text.length > 0 ? { type: "caption", ts: x.ts, text: x.text, ...lang } : null;
-      }
-      return x.unavailable === true
-        ? { type: "caption", ts: x.ts, text: x.text, ...lang, unavailable: true }
-        : null;
-    }
     default:
       return null;
   }

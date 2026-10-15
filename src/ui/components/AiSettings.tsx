@@ -1,11 +1,10 @@
 /**
- * "Language and AI": the language captions and translations use, and the browser's built-in
- * models (speech recognition for captions, Translator, Summarizer, Language detection). The
- * browser runs them on the device; Veil downloads no model of its own. Loaded lazily by the
- * Settings sheet; detection runs the first time it is shown.
+ * "Language and AI": the language chat is translated into, and the browser's built-in models
+ * (Translator, Language detection). The browser runs them on the device; Veil downloads no model
+ * of its own. Loaded lazily by the Settings sheet; detection runs the first time it is shown.
  */
 import type { JSX } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect } from "preact/hooks";
 import {
   aiBuiltin,
   aiBuiltinProgress,
@@ -16,8 +15,7 @@ import {
   downloadBuiltin,
   recheckBuiltin,
 } from "../../ai/store";
-import { speechRecognition } from "../../features/captions";
-import { LANGUAGES, languageName, speechLang } from "../language";
+import { LANGUAGES, languageName } from "../language";
 import { saveSettings, settings } from "../settings";
 import { Icon } from "./Icons";
 import { Toggle } from "./SettingsSheet";
@@ -25,7 +23,6 @@ import { Toggle } from "./SettingsSheet";
 const BUILTIN: { name: BuiltinName; label: string }[] = [
   { name: "translator", label: "Translator" },
   { name: "languageDetector", label: "Language detection" },
-  { name: "summarizer", label: "Summarizer (meeting notes)" },
 ];
 
 const AVAILABILITY: Record<BuiltinState, string> = {
@@ -35,9 +32,6 @@ const AVAILABILITY: Record<BuiltinState, string> = {
   unavailable: "Not available",
   unknown: "Couldn't check",
 };
-
-const SUMMARIZER_HINT =
-  "Chrome needs its Gemini Nano model for this, which requires lots of free disk space.";
 
 function Progress(props: { pct: number }): JSX.Element {
   return (
@@ -51,37 +45,6 @@ function Progress(props: { pct: number }): JSX.Element {
       <div class="progress-bar" style={{ transform: `scaleX(${Math.min(1, props.pct / 100)})` }} />
     </div>
   );
-}
-
-/**
- * Whether the browser recognizes speech in `lang` on the device (captions never go online).
- * Probed on a click only: the probe can take the page down in some Chromium builds.
- */
-function useSpeechAvailability(
-  lang: string,
-): [BuiltinState | "checking" | null, () => void, () => void] {
-  const [state, setState] = useState<BuiltinState | "checking" | null>(null);
-  const supported = !!speechRecognition()?.available;
-  // A new language needs a new check.
-  useEffect(() => setState(supported ? null : "unavailable"), [lang, supported]);
-  const check = () => {
-    const Recognition = speechRecognition();
-    if (!Recognition?.available) return;
-    setState("checking");
-    Recognition.available({ langs: [lang], processLocally: true })
-      .then((s) => setState(s))
-      .catch(() => setState("unavailable"));
-  };
-  // From the click: Chrome downloads a model only while handling one.
-  const download = () => {
-    const Recognition = speechRecognition();
-    if (!Recognition?.install) return;
-    setState("downloading");
-    Recognition.install({ langs: [lang], processLocally: true })
-      .then((ok) => setState(ok ? "available" : "unavailable"))
-      .catch(() => setState("unavailable"));
-  };
-  return [state, check, download];
 }
 
 function LanguagePicker(): JSX.Element {
@@ -112,10 +75,7 @@ function LanguagePicker(): JSX.Element {
             </option>
           ))}
       </select>
-      <span class="hint">
-        What you speak, for your captions, and what others' captions and messages are translated
-        into.
-      </span>
+      <span class="hint">What messages in other languages are translated into.</span>
     </label>
   );
 }
@@ -123,38 +83,10 @@ function LanguagePicker(): JSX.Element {
 function BuiltinList(): JSX.Element {
   const found = aiBuiltin.value;
   const progress = aiBuiltinProgress.value;
-  const [speech, checkSpeech, downloadSpeech] = useSpeechAvailability(speechLang());
   return (
     <div class="stack-sm">
       <span class="label">Built into this browser</span>
       <ul class="ai-builtin" data-testid="ai-builtin">
-        <li data-testid="ai-builtin-speech">
-          <span>Speech recognition (captions)</span>
-          {speech === null ? (
-            <button
-              type="button"
-              class="btn btn-ghost btn-sm"
-              data-testid="speech-check"
-              onClick={checkSpeech}
-            >
-              Check
-            </button>
-          ) : speech === "downloadable" ? (
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              data-testid="speech-download"
-              onClick={downloadSpeech}
-            >
-              <Icon name="download" size={16} />
-              Download
-            </button>
-          ) : (
-            <span class="muted small" data-testid="ai-builtin-status">
-              {speech === "checking" ? "Checking…" : AVAILABILITY[speech]}
-            </span>
-          )}
-        </li>
         {BUILTIN.map(({ name, label }) => {
           const loaded = progress[name];
           const state = found?.[name];
@@ -198,13 +130,6 @@ function BuiltinList(): JSX.Element {
           );
         })}
       </ul>
-      {speech === "unavailable" && (
-        <p class="muted small" data-testid="speech-unavailable">
-          Captions need a browser that recognizes speech on the device, such as a recent Chrome on a
-          computer.
-        </p>
-      )}
-      {found?.summarizer === "unavailable" && <p class="muted small">{SUMMARIZER_HINT}</p>}
     </div>
   );
 }
@@ -218,7 +143,7 @@ export function AiSettings(): JSX.Element {
     <fieldset class="group" id="ai-settings" data-testid="ai-settings">
       <legend>Language and AI</legend>
       <p class="muted small">
-        Uses only what your browser runs on this device: nothing you type or say is sent.
+        Uses only what your browser runs on this device: nothing you type is sent.
       </p>
       <LanguagePicker />
       <BuiltinList />

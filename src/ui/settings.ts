@@ -39,7 +39,7 @@ export interface Settings {
   screenQuality: ScreenQuality;
   layout: Layout;
   /**
-   * The language captions are recognized in and translations land in, as a BCP 47 tag;
+   * The language translations land in, as a BCP 47 tag;
    * "" follows the browser's.
    */
   language: string;

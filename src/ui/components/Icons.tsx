@@ -35,9 +35,6 @@ const PATHS = {
   wifi: "M2 9a15 15 0 0 1 20 0 M5.5 12.5a10 10 0 0 1 13 0 M9 16a5 5 0 0 1 6 0 M12 19.5h.01",
   hand: "M12 12h.01",
   record: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
-  sparkle:
-    "M10 4l1.6 4.4L16 10l-4.4 1.6L10 16l-1.6-4.4L4 10l4.4-1.6z M18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8z",
-  captions: "M3 5h18v14H3z M10.5 10a2.5 2.5 0 1 0 0 4 M17 10a2.5 2.5 0 1 0 0 4",
   layout: "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z",
   spotlight: "M3 4h18v11H3z M3 19h5 M10 19h4 M16 19h5",
   fullscreen: "M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5",

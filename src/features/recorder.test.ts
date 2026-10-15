@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  formatTranscript,
   gridLayout,
   initials,
   pickMime,
-  Recorder,
   type Rect,
   recordingNames,
   spotlightLayout,
@@ -139,7 +137,6 @@ describe("recordingNames", () => {
   test("names each part after the local start time", () => {
     expect(recordingNames(date, "video")).toBe("veil-meeting-2026-03-07-0905.webm");
     expect(recordingNames(date, "audio")).toBe("veil-meeting-2026-03-07-0905.audio.webm");
-    expect(recordingNames(date, "transcript")).toBe("veil-meeting-2026-03-07-0905.txt");
   });
 
   test("follows the container of the chosen MIME type", () => {
@@ -150,60 +147,6 @@ describe("recordingNames", () => {
     expect(recordingNames(date, "audio", "audio/ogg;codecs=opus")).toBe(
       "veil-meeting-2026-03-07-0905.audio.ogg",
     );
-  });
-});
-
-describe("formatTranscript", () => {
-  const start = 1_000_000;
-
-  test("stamps each line with the time elapsed since start", () => {
-    const text = formatTranscript(start, [
-      { nick: "Alice", ts: start, text: "hello" },
-      { nick: "Bob", ts: start + 65_500, text: "hi there" },
-      { nick: "Alice", ts: start + 3_725_000, text: "still here" },
-    ]);
-    expect(text).toBe(
-      "[00:00:00] Alice: hello\n[00:01:05] Bob: hi there\n[01:02:05] Alice: still here\n",
-    );
-  });
-
-  test("notices say transcription is unavailable", () => {
-    expect(formatTranscript(start, [{ nick: "Carol", ts: start + 5000, text: null }])).toBe(
-      "Carol: transcription unavailable on this device\n",
-    );
-  });
-
-  test("clamps captions stamped before the start", () => {
-    expect(formatTranscript(start, [{ nick: "Dan", ts: start - 2000, text: "early" }])).toBe(
-      "[00:00:00] Dan: early\n",
-    );
-  });
-
-  test("empty without captions", () => {
-    expect(formatTranscript(start, [])).toBe("");
-  });
-
-  test("a language does not change the transcript", () => {
-    expect(formatTranscript(start, [{ nick: "Eve", ts: start, text: "hallo", lang: "de" }])).toBe(
-      "[00:00:00] Eve: hallo\n",
-    );
-  });
-});
-
-describe("recorder lines", () => {
-  test("keeps each caption's language and hands out a copy", () => {
-    const rec = new Recorder({ sources: () => [], sink: async () => null, now: () => 0 });
-    rec.addCaption("Alice", 1, "bonjour", "fr-FR");
-    rec.addCaption("Bob", 2, null);
-    const lines = rec.lines();
-    expect(lines).toEqual([
-      { nick: "Alice", ts: 1, text: "bonjour", lang: "fr-FR" },
-      { nick: "Bob", ts: 2, text: null },
-    ]);
-    lines.pop();
-    if (lines[0]) lines[0].text = "changed";
-    expect(rec.lines()).toHaveLength(2);
-    expect(rec.lines()[0]?.text).toBe("bonjour");
   });
 });
 

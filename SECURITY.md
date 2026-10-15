@@ -77,11 +77,9 @@ member.
 
 - Strict CSP in a `<meta>` tag: `default-src 'none'`, scripts and styles from
   `'self'` only, `connect-src 'self' wss:`, `require-trusted-types-for 'script'`.
-- AI (captions, translation, meeting notes) uses only the browser's built-in
-  APIs: speech recognition with `processLocally` (never the online service),
-  and Chrome's Translator, LanguageDetector and Summarizer. The browser runs
-  them on the device; Veil downloads no model, so the CSP has no exception for
-  them, and no audio, transcript or message is sent anywhere.
+- Chat translation uses only the browser's built-in APIs, Chrome's Translator
+  and LanguageDetector. The browser runs them on the device; Veil downloads no
+  model, so the CSP has no exception for them, and no message is sent anywhere.
 - No inline script or style, no third-party script, font, CDN or analytics.
   The build fails if the page has an inline script or an external URL.
 - `no-referrer`, and the app refuses to run inside a frame (clickjacking),

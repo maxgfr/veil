@@ -1,5 +1,5 @@
 /**
- * Narrow types over the browser's built-in AI (Chrome's `Summarizer`, `Translator` and `LanguageDetector`).
+ * Narrow types over the browser's built-in AI (Chrome's `Translator` and `LanguageDetector`).
  * Each model runs on the device; a `downloadable` one is fetched by the browser on the first `create()`.
  */
 
@@ -13,29 +13,6 @@ export interface CreateMonitor {
 interface CreateCommon {
   monitor?: (m: CreateMonitor) => void;
   signal?: AbortSignal;
-}
-
-export interface SummarizerOptions {
-  type?: "key-points" | "tldr" | "teaser" | "headline";
-  format?: "markdown" | "plain-text";
-  length?: "short" | "medium" | "long";
-  sharedContext?: string;
-  expectedInputLanguages?: string[];
-  outputLanguage?: string;
-}
-
-export interface SummarizerSession {
-  summarize(text: string, opts?: { context?: string; signal?: AbortSignal }): Promise<string>;
-  summarizeStreaming?(
-    text: string,
-    opts?: { context?: string; signal?: AbortSignal },
-  ): AsyncIterable<string>;
-  destroy?(): void;
-}
-
-export interface SummarizerApi {
-  availability(opts?: SummarizerOptions): Promise<Availability>;
-  create(opts?: SummarizerOptions & CreateCommon): Promise<SummarizerSession>;
 }
 
 export interface TranslatorPair {
@@ -69,7 +46,6 @@ export interface LanguageDetectorApi {
 }
 
 export interface BuiltinApis {
-  summarizer?: SummarizerApi;
   translator?: TranslatorApi;
   languageDetector?: LanguageDetectorApi;
 }
@@ -84,9 +60,8 @@ function isApi<T>(v: unknown): v is T {
 
 /** The built-in AI globals present in `scope`, each only if it looks usable. */
 export function builtinApis(scope: object = globalThis): BuiltinApis {
-  const g = scope as { Summarizer?: unknown; Translator?: unknown; LanguageDetector?: unknown };
+  const g = scope as { Translator?: unknown; LanguageDetector?: unknown };
   const out: BuiltinApis = {};
-  if (isApi<SummarizerApi>(g.Summarizer)) out.summarizer = g.Summarizer;
   if (isApi<TranslatorApi>(g.Translator)) out.translator = g.Translator;
   if (isApi<LanguageDetectorApi>(g.LanguageDetector)) out.languageDetector = g.LanguageDetector;
   return out;
