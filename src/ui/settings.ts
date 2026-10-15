@@ -35,6 +35,8 @@ export interface Settings {
   turn: TurnServer | null;
   audioDevice: string;
   videoDevice: string;
+  /** RNNoise on the microphone, over the browser's own noise suppression. */
+  noiseReduction: boolean;
   ai: AiSettings;
   screenQuality: ScreenQuality;
   layout: Layout;
@@ -55,6 +57,7 @@ export function defaultSettings(): Settings {
     turn: null,
     audioDevice: "",
     videoDevice: "",
+    noiseReduction: false,
     ai: { translateChat: false },
     screenQuality: "detail",
     layout: "auto",
@@ -109,6 +112,7 @@ export function parseSettings(raw: string | null): Settings {
         : null,
     audioDevice: typeof x.audioDevice === "string" ? x.audioDevice : "",
     videoDevice: typeof x.videoDevice === "string" ? x.videoDevice : "",
+    noiseReduction: typeof x.noiseReduction === "boolean" ? x.noiseReduction : d.noiseReduction,
     ai: {
       translateChat: typeof ai.translateChat === "boolean" ? ai.translateChat : d.ai.translateChat,
     },

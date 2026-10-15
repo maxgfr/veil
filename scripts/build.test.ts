@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { auditHtml, type BuildResult, build, CSP } from "./build";
+import { auditHtml, type BuildResult, build, CSP, LAZY_DIR } from "./build";
 import { BUDGET_GZIP, initialScripts } from "./check-size";
 
 let out: BuildResult;
@@ -27,7 +27,7 @@ describe("build output", () => {
     // No relaxation and no remote host: nothing is downloaded from elsewhere.
     expect(CSP.split("; ")).toEqual([
       "default-src 'none'",
-      "script-src 'self'",
+      "script-src 'self' 'wasm-unsafe-eval'",
       "style-src 'self'",
       "connect-src 'self' wss:",
       "img-src 'self' blob: data:",
@@ -38,7 +38,8 @@ describe("build output", () => {
       "form-action 'none'",
       "require-trusted-types-for 'script'",
     ]);
-    expect(CSP).not.toContain("unsafe");
+    // The one relaxation: compiling WebAssembly (opt-in noise reduction), never JavaScript.
+    expect(CSP.replace("'wasm-unsafe-eval'", "")).not.toContain("unsafe");
     expect(CSP).not.toContain("https:");
     expect(html).toContain('<meta name="referrer" content="no-referrer" />');
     // The CSP must come before anything it governs.
@@ -71,6 +72,18 @@ describe("build output", () => {
     for (const f of out.files.filter((f) => f !== "sw.js")) expect(sw).toContain(`./${f}`);
     // Fetched past the HTTP cache, so a stale shell never names a script the deploy removed.
     expect(sw).toMatch(/cache:\s*"reload"/);
+  });
+
+  test("the noise reduction's files are built, and downloaded only when it is turned on", () => {
+    const noise = readdirSync(join(dir, LAZY_DIR)).sort();
+    expect(noise).toHaveLength(3);
+    expect(noise.some((f) => /^workletProcessor-\w+\.js$/.test(f))).toBe(true);
+    expect(noise.filter((f) => f.endsWith(".wasm"))).toHaveLength(2);
+    const sw = read("sw.js");
+    for (const f of noise) {
+      expect(sw).not.toContain(f);
+      expect(out.files).not.toContain(`${LAZY_DIR}/${f}`);
+    }
   });
 
   test("no runtime code comes from a CDN", () => {

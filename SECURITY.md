@@ -77,9 +77,14 @@ member.
 
 - Strict CSP in a `<meta>` tag: `default-src 'none'`, scripts and styles from
   `'self'` only, `connect-src 'self' wss:`, `require-trusted-types-for 'script'`.
+  Its one relaxation is `'wasm-unsafe-eval'`, for strong noise reduction
+  (RNNoise, compiled from WebAssembly served by Veil itself). It allows
+  compiling WebAssembly, never evaluating JavaScript. The option is off by
+  default, its files are fetched only when it is turned on, and the audio is
+  processed on the device before it is encrypted and sent.
 - Chat translation uses only the browser's built-in APIs, Chrome's Translator
   and LanguageDetector. The browser runs them on the device; Veil downloads no
-  model, so the CSP has no exception for them, and no message is sent anywhere.
+  model, and no message is sent anywhere.
 - No inline script or style, no third-party script, font, CDN or analytics.
   The build fails if the page has an inline script or an external URL.
 - `no-referrer`, and the app refuses to run inside a frame (clickjacking),

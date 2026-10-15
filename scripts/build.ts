@@ -14,7 +14,8 @@ const ROOT = resolve(import.meta.dir, "..");
 
 export const CSP = [
   "default-src 'none'",
-  "script-src 'self'",
+  // RNNoise (opt-in strong noise reduction) compiles WebAssembly; no eval of JavaScript.
+  "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self'",
   "connect-src 'self' wss:",
   "img-src 'self' blob: data:",
@@ -66,6 +67,32 @@ async function listFiles(dir: string, base = dir): Promise<string[]> {
   return out.sort();
 }
 
+/** The opt-in noise reduction's files: downloaded only when it is turned on, so never precached. */
+export const LAZY_DIR = "assets/noise";
+
+const NOISE_FILES = {
+  worklet: "rnnoise/workletProcessor.js",
+  wasm: "rnnoise.wasm",
+  simd: "rnnoise_simd.wasm",
+} as const;
+
+type NoiseAssets = Record<keyof typeof NOISE_FILES, string>;
+
+/** Copies RNNoise's worklet and binaries under content-hashed names; returns their URLs. */
+async function copyNoiseAssets(outdir: string): Promise<NoiseAssets> {
+  const src = join(ROOT, "node_modules/@sapphi-red/web-noise-suppressor/dist");
+  await mkdir(join(outdir, LAZY_DIR), { recursive: true });
+  const urls = {} as NoiseAssets;
+  for (const [key, file] of Object.entries(NOISE_FILES) as [keyof NoiseAssets, string][]) {
+    const data = await readFile(join(src, file));
+    const hash = createHash("sha256").update(data).digest("hex").slice(0, 8);
+    const name = (file.split("/").pop() ?? file).replace(/\.(js|wasm)$/, `-${hash}.$1`);
+    await writeFile(join(outdir, LAZY_DIR, name), data);
+    urls[key] = `./${LAZY_DIR}/${name}`;
+  }
+  return urls;
+}
+
 function assertOk(result: Awaited<ReturnType<typeof Bun.build>>, what: string): void {
   if (!result.success) {
     for (const log of result.logs) console.error(log);
@@ -115,6 +142,8 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     worker.outputs.find((o) => o.kind === "entry-point") ?? fail("no worker output");
   const workerUrl = `./${relative(outdir, workerOut.path).split("\\").join("/")}`;
 
+  const noiseAssets = await copyNoiseAssets(outdir);
+
   // 2. The app, from its HTML entrypoint.
   const app = await Bun.build({
     entrypoints: [join(ROOT, "index.html")],
@@ -126,6 +155,7 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     naming,
     define: {
       __E2EE_WORKER_URL__: JSON.stringify(workerUrl),
+      __NOISE_ASSETS__: JSON.stringify(noiseAssets),
       "process.env.NODE_ENV": JSON.stringify(minify ? "production" : "development"),
     },
   });
@@ -144,7 +174,9 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
   await writeFile(htmlPath, html);
 
   // 5. Service worker, versioned by the content hash of everything it caches.
-  const files = (await listFiles(outdir)).filter((f) => f !== "sw.js");
+  const files = (await listFiles(outdir)).filter(
+    (f) => f !== "sw.js" && !f.startsWith(`${LAZY_DIR}/`),
+  );
   const hash = createHash("sha256");
   for (const f of files) {
     hash.update(f);

@@ -117,3 +117,42 @@ test("a saved microphone that isn't listed can be switched back to the system de
   expect(saved).toBe("");
   await a.ctx.close();
 });
+
+test("strong noise reduction runs RNNoise on the microphone, applied live", async ({ browser }) => {
+  const a = await member(browser);
+  const warnings: string[] = [];
+  a.page.on("console", (m) => {
+    if (m.type() === "warning") warnings.push(m.text());
+  });
+  await a.page.goto("http://localhost:4173/?nosw");
+  await a.page.getByTestId("new-room").click();
+  await a.page.getByTestId("enter-room").click();
+  await expect(a.page.getByTestId("room")).toBeVisible();
+  await closeSheets(a.page);
+  await a.page.getByTestId("toggle-mic").click();
+  await expect(a.page.getByTestId("toggle-mic")).toHaveAttribute("aria-pressed", "true");
+  const device = await a.page.getByTestId("room").getAttribute("data-mic-device");
+
+  // Turned on during the call: its files load only now, and the microphone reopens through it.
+  const wasm = a.page.waitForRequest(/\/assets\/noise\/rnnoise(_simd)?-\w+\.wasm$/);
+  await expect(a.page.getByTestId("room")).toHaveAttribute("data-noise-reduction", "false");
+  await a.page.getByRole("button", { name: "Settings", exact: true }).click();
+  const toggle = a.page.getByTestId("toggle-noise-reduction");
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await wasm;
+  await expect(a.page.getByTestId("room")).toHaveAttribute("data-noise-reduction", "true");
+  await a.page.keyboard.press("Escape");
+  await expect(a.page.getByText("Strong noise reduction couldn't start")).toHaveCount(0);
+  // Still the same device underneath.
+  await expect(a.page.getByTestId("room")).toHaveAttribute("data-mic-device", device ?? "");
+  await a.page.waitForTimeout(1000);
+  expect(warnings.filter((w) => w.includes("noise reduction failed"))).toEqual([]);
+  const saved = await a.page.evaluate(
+    () => JSON.parse(localStorage.getItem("veil.settings.v1") ?? "{}").noiseReduction,
+  );
+  expect(saved).toBe(true);
+
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
+});
