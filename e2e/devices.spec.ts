@@ -62,6 +62,7 @@ test("the microphone chosen in the lobby is the one used in the room", async ({ 
 
 test("turning the microphone on in a room uses the selected device, and switching applies live", async ({
   browser,
+  browserName,
 }) => {
   const a = await member(browser);
   await a.page.goto("http://localhost:4173/?nosw");
@@ -84,5 +85,11 @@ test("turning the microphone on in a room uses the selected device, and switchin
   await a.page.getByRole("button", { name: "Settings", exact: true }).click();
   await a.page.getByTestId("select-mic").selectOption({ label: "Fake Audio Input 1" });
   await expect(a.page.getByTestId("room")).toHaveAttribute("data-mic-device", input1);
+
+  // "System default" follows the system's default microphone (Chromium's "default" alias),
+  // not the device picked last on this site.
+  await a.page.getByTestId("select-mic").selectOption({ label: "System default" });
+  if (browserName === "chromium")
+    await expect(a.page.getByTestId("room")).toHaveAttribute("data-mic-device", "default");
   await a.ctx.close();
 });

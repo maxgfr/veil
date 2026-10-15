@@ -30,7 +30,11 @@ export const VIDEO_SHAPE = {
 
 export function constraintsFor(kind: MediaKind, deviceId: string): MediaTrackConstraints {
   const base = kind === "audio" ? AUDIO_PROCESSING : VIDEO_SHAPE;
-  return deviceId ? { ...base, deviceId: { exact: deviceId } } : { ...base };
+  if (deviceId) return { ...base, deviceId: { exact: deviceId } };
+  // Chromium's "default" alias follows the system's default microphone. Without it, Chrome opens
+  // the device it ranks first for the site (the one picked last), not the system's. Ideal only:
+  // browsers without the alias open their default anyway.
+  return kind === "audio" ? { ...base, deviceId: "default" } : { ...base };
 }
 
 type GetUserMedia = (c: MediaStreamConstraints) => Promise<MediaStream>;
