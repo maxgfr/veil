@@ -57,7 +57,9 @@ function Progress(props: { pct: number }): JSX.Element {
  * Whether the browser recognizes speech in `lang` on the device (captions never go online).
  * Probed on a click only: the probe can take the page down in some Chromium builds.
  */
-function useSpeechAvailability(lang: string): [BuiltinState | "checking" | null, () => void] {
+function useSpeechAvailability(
+  lang: string,
+): [BuiltinState | "checking" | null, () => void, () => void] {
   const [state, setState] = useState<BuiltinState | "checking" | null>(null);
   const supported = !!speechRecognition()?.available;
   // A new language needs a new check.
@@ -70,7 +72,16 @@ function useSpeechAvailability(lang: string): [BuiltinState | "checking" | null,
       .then((s) => setState(s))
       .catch(() => setState("unavailable"));
   };
-  return [state, check];
+  // From the click: Chrome downloads a model only while handling one.
+  const download = () => {
+    const Recognition = speechRecognition();
+    if (!Recognition?.install) return;
+    setState("downloading");
+    Recognition.install({ langs: [lang], processLocally: true })
+      .then((ok) => setState(ok ? "available" : "unavailable"))
+      .catch(() => setState("unavailable"));
+  };
+  return [state, check, download];
 }
 
 function LanguagePicker(): JSX.Element {
@@ -112,7 +123,7 @@ function LanguagePicker(): JSX.Element {
 function BuiltinList(): JSX.Element {
   const found = aiBuiltin.value;
   const progress = aiBuiltinProgress.value;
-  const [speech, checkSpeech] = useSpeechAvailability(speechLang());
+  const [speech, checkSpeech, downloadSpeech] = useSpeechAvailability(speechLang());
   return (
     <div class="stack-sm">
       <span class="label">Built into this browser</span>
@@ -127,6 +138,16 @@ function BuiltinList(): JSX.Element {
               onClick={checkSpeech}
             >
               Check
+            </button>
+          ) : speech === "downloadable" ? (
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              data-testid="speech-download"
+              onClick={downloadSpeech}
+            >
+              <Icon name="download" size={16} />
+              Download
             </button>
           ) : (
             <span class="muted small" data-testid="ai-builtin-status">
