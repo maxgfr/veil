@@ -77,20 +77,11 @@ member.
 
 - Strict CSP in a `<meta>` tag: `default-src 'none'`, scripts and styles from
   `'self'` only, `connect-src 'self' wss:`, `require-trusted-types-for 'script'`.
-- On-device AI widens it by exactly what WebLLM needs, nothing else:
-  `'wasm-unsafe-eval'` in `script-src` (it compiles WebAssembly; JavaScript
-  `eval` stays blocked and Trusted Types stay required), and `connect-src` to
-  `https://huggingface.co`, `https://*.hf.co` (the weights and their CDN) and
-  `https://raw.githubusercontent.com` (the compiled model library). These are
-  downloads only: the model runs in a worker on the device, and no prompt,
-  transcript or message is ever sent anywhere. WebLLM is bundled into that
-  worker alone (the build checks it), never into the page.
-- Speech recognition, when the browser can't do it on the device, runs Whisper
-  (transformers.js on ONNX Runtime Web) in its own worker, the only bundle that
-  carries them. ONNX Runtime's WebAssembly is served by Veil itself, never by
-  its default CDN (the build checks it); the worker's requests are limited to
-  `https://huggingface.co` and `https://*.hf.co`, for the weights, and only
-  during a download you clicked. The audio never leaves the device.
+- AI (captions, translation, meeting notes) uses only the browser's built-in
+  APIs: speech recognition with `processLocally` (never the online service),
+  and Chrome's Translator, LanguageDetector and Summarizer. The browser runs
+  them on the device; Veil downloads no model, so the CSP has no exception for
+  them, and no audio, transcript or message is sent anywhere.
 - No inline script or style, no third-party script, font, CDN or analytics.
   The build fails if the page has an inline script or an external URL.
 - `no-referrer`, and the app refuses to run inside a frame (clickjacking),

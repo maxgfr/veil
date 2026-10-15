@@ -1973,7 +1973,8 @@ textarea.input {
 
 .live-captions {
   position: absolute;
-  inset: auto 12px 12px;
+  /* Above the tiles' name labels, which sit on their bottom edge. */
+  inset: auto 12px 56px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2000,6 +2001,34 @@ textarea.input {
 .live-caption-note {
   color: oklch(0.8 0.01 255);
   font-size: 12px;
+}
+
+/* What the captions are doing: stays put, unlike the lines that fade. */
+.live-caption-status {
+  max-width: min(720px, 100%);
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: oklch(0 0 0 / 0.6);
+  color: oklch(0.88 0.01 255);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.live-caption-action {
+  pointer-events: auto;
+  min-height: 24px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 @media (prefers-reduced-motion: no-preference) {

@@ -6,18 +6,10 @@
  * The UI subscribes to `tick`, bumped (at most once per frame) whenever
  * anything changes, and reads plain fields from here.
  */
-import { signal } from "@preact/signals";
-import { getSpeechEngine } from "../ai/speech";
-import { ensureSpeechModel } from "../ai/speechStore";
+import { effect, signal } from "@preact/signals";
 import { sha256 } from "../crypto/bytes";
 import { SAS_EMOJIS, type Sas } from "../crypto/sas";
-import { AudioTranscriber } from "../features/audioCaptions";
-import {
-  type Caption,
-  type CaptionSource,
-  speechRecognition,
-  Transcriber,
-} from "../features/captions";
+import { type Caption, speechRecognition, Transcriber } from "../features/captions";
 import { Chat, type ChatMessage } from "../features/chat";
 import {
   clearTemporaryFiles,
@@ -38,6 +30,7 @@ import type { AppMessage, MediaState } from "../mesh/protocol";
 import { type LinkInfo, type Member, Room } from "../mesh/room";
 import type { SignalConfig } from "../signal/mux";
 import type { TransportStatus } from "../signal/types";
+import { speechLang } from "./language";
 import { iceServers, type ScreenQuality, type Settings, saveSettings, settings } from "./settings";
 
 export interface JoinParams {
@@ -105,6 +98,8 @@ export class RoomSession {
   readonly captionsOn = signal(false);
   /** The last captions said in the room, oldest first. */
   readonly liveCaptions = signal<LiveCaption[]>([]);
+  /** Who (by peer id, us included) said their device can't caption them, until it does. */
+  readonly captionsUnavailable = signal<ReadonlySet<string>>(new Set());
   chatOpen = false;
   filesVisible = false;
   transports: TransportStatus[] = [];
@@ -133,6 +128,7 @@ export class RoomSession {
   private captionMembers = new Set<string>();
   /** The microphone track the transcriber was started on. */
   private transcribedTrack: MediaStreamTrack | null = null;
+  private readonly stopLanguageWatch: () => void;
 
   private constructor(
     readonly room: Room,
@@ -177,9 +173,21 @@ export class RoomSession {
     });
     this.transcriber = new Transcriber({
       Recognition: speechRecognition(),
-      lang: navigator.language,
+      // Read at each start: a language picked in Settings applies from the next one.
+      get lang() {
+        return speechLang();
+      },
       send: (caption) => this.onOwnCaption(caption),
-      fallback: () => this.audioCaptions(),
+    });
+    let language = settings.value.language;
+    this.stopLanguageWatch = effect(() => {
+      if (settings.value.language === language) return;
+      language = settings.value.language;
+      // A fresh start in the new language: it says again if it can't caption.
+      this.setCaptionUnavailable(this.peerId, false);
+      this.transcriber.reset();
+      this.transcribedTrack = null;
+      this.syncTranscriber();
     });
   }
 
@@ -343,6 +351,7 @@ export class RoomSession {
     } else if (msg.type === "caption") {
       const nick = this.nickOf(author);
       this.recorder?.addCaption(nick, msg.ts, msg.unavailable ? null : msg.text, msg.lang);
+      this.setCaptionUnavailable(author, !!msg.unavailable);
       if (!msg.unavailable) this.addLiveCaption(nick, msg.ts, msg.text, msg.lang);
     } else {
       const before = this.chat.messages.length;
@@ -644,39 +653,27 @@ export class RoomSession {
     }
   }
 
-  /**
-   * Captions from the downloaded Whisper model, when the browser can't recognize
-   * speech on the device: it is loaded if fully cached (never downloaded from here).
-   */
-  private async audioCaptions(): Promise<CaptionSource | null> {
-    if (!settings.value.ai.speechModel) return null;
-    try {
-      if (!(await ensureSpeechModel())) return null;
-    } catch (err) {
-      console.warn("speech model failed to load", err);
-      return null;
-    }
-    const engine = getSpeechEngine();
-    if (!engine.ready) return null;
-    return new AudioTranscriber({
-      track: () => this.media.audioTrack,
-      engine,
-      lang: navigator.language,
-      send: (caption) => this.onOwnCaption(caption),
-    });
-  }
-
   private onOwnCaption(caption: Caption): void {
     const nick = this.nickOf(this.peerId);
+    this.setCaptionUnavailable(this.peerId, "unavailable" in caption);
     if ("unavailable" in caption) {
       void this.room.send({ type: "caption", ...caption });
       this.recorder?.addCaption(nick, caption.ts, null);
       return;
     }
-    const lang = caption.lang ?? navigator.language;
+    const lang = caption.lang ?? speechLang();
     void this.room.send({ type: "caption", ts: caption.ts, text: caption.text, lang });
     this.recorder?.addCaption(nick, caption.ts, caption.text, lang);
     this.addLiveCaption(nick, caption.ts, caption.text, lang);
+  }
+
+  private setCaptionUnavailable(peerId: string, unavailable: boolean): void {
+    const now = this.captionsUnavailable.value;
+    if (now.has(peerId) === unavailable) return;
+    const next = new Set(now);
+    if (unavailable) next.add(peerId);
+    else next.delete(peerId);
+    this.captionsUnavailable.value = next;
   }
 
   private addLiveCaption(nick: string, ts: number, text: string, lang?: string): void {
@@ -700,6 +697,7 @@ export class RoomSession {
   async leave(): Promise<void> {
     if (this.left) return;
     this.left = true;
+    this.stopLanguageWatch();
     this.transcriber.stop();
     if (this.recorder) {
       await this.recorder.stop();

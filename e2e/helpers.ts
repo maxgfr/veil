@@ -158,41 +158,10 @@ export function fakeBuiltinAi(): void {
   }));
 }
 
-export interface FakeDevice {
-  /** `navigator.deviceMemory`, GiB. */
-  memory: number;
-  /** `navigator.storage.estimate()`, bytes. */
-  quota: number;
-  usage: number;
-}
-
-/** Init script: a WebGPU adapter with `shader-f16`, the RAM and the free space given. */
-export function fakeDevice(d: FakeDevice): void {
-  const GiB = 1024 ** 3;
-  const adapter = {
-    features: new Set(["shader-f16"]),
-    limits: {
-      maxBufferSize: 2 * GiB,
-      maxStorageBufferBindingSize: 2 * GiB,
-      maxComputeWorkgroupStorageSize: 32 * 1024,
-    },
-    info: { vendor: "fake" },
-  };
-  Object.defineProperty(Navigator.prototype, "gpu", {
-    configurable: true,
-    get: () => ({ requestAdapter: async () => adapter }),
-  });
-  Object.defineProperty(Navigator.prototype, "deviceMemory", {
-    configurable: true,
-    get: () => d.memory,
-  });
-  StorageManager.prototype.estimate = async () => ({ quota: d.quota, usage: d.usage });
-}
-
 /**
  * Init script: on-device speech recognition that hears `text` shortly after it
- * starts, then again every few seconds. No save picker either (files go to
- * private storage).
+ * starts, then again every few seconds; each start's language is logged in
+ * `window.heardIn`. No save picker either (files go to private storage).
  */
 export function fakeSpeechSaying(text: string): void {
   delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
@@ -207,6 +176,8 @@ export function fakeSpeechSaying(text: string): void {
     onend: (() => void) | null = null;
     private timers: ReturnType<typeof setTimeout>[] = [];
     start(): void {
+      const w = window as unknown as { heardIn?: string[] };
+      w.heardIn = [...(w.heardIn ?? []), this.lang];
       const hear = () => {
         const result = Object.assign([{ transcript: text }], { isFinal: true });
         this.onresult?.({ resultIndex: 0, results: [result] });
@@ -224,17 +195,6 @@ export function fakeSpeechSaying(text: string): void {
   (window as { SpeechRecognition?: unknown }).SpeechRecognition = FakeRecognition;
 }
 
-/** Init script: merges `ai` into the stored settings (runs after `member`'s own). */
-export function aiSettings(ai: {
-  model: string | null;
-  translateChat: boolean;
-  speechModel?: string | null;
-}): void {
-  const key = "veil.settings.v1";
-  const s = JSON.parse(localStorage.getItem(key) ?? "{}");
-  localStorage.setItem(key, JSON.stringify({ ...s, ai: { speechModel: null, ...ai } }));
-}
-
 /** Init script: a browser that can't recognize speech on the device (no Web Speech at all). */
 export function noWebSpeech(): void {
   const w = window as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
@@ -242,118 +202,11 @@ export function noWebSpeech(): void {
   delete w.webkitSpeechRecognition;
 }
 
-/**
- * Init script: the microphone "speaks": a tone for 1.5 s, then 1 s of
- * silence, over and over, in place of the fake device's audio.
- */
-export function fakeMicSpeaking(): void {
-  const real = MediaDevices.prototype.getUserMedia;
-  MediaDevices.prototype.getUserMedia = async function (constraints) {
-    const stream = await real.call(this, constraints);
-    if (!constraints?.audio) return stream;
-    const ctx = new AudioContext();
-    const tone = ctx.createOscillator();
-    tone.frequency.value = 220;
-    const gain = ctx.createGain();
-    gain.gain.value = 0;
-    for (let t = 0; t < 300; t += 2.5) {
-      gain.gain.setValueAtTime(0.3, t);
-      gain.gain.setValueAtTime(0, t + 1.5);
-    }
-    const out = ctx.createMediaStreamDestination();
-    tone.connect(gain).connect(out);
-    tone.start();
-    void ctx.resume();
-    for (const t of stream.getAudioTracks()) {
-      stream.removeTrack(t);
-      t.stop();
-    }
-    for (const t of out.stream.getAudioTracks()) stream.addTrack(t);
-    return stream;
-  };
-}
-
-/**
- * Init script: the speech worker (Whisper), faked. `cached` models are fully
- * downloaded; a load with `download` caches its model after some progress, a
- * load without it fails if the model isn't cached; every transcription is
- * `text`. Each request is logged in `window.speechReqs`. Other workers are real.
- */
-export function fakeSpeechWorker(o: { cached: string[]; text: string }): void {
-  interface Req {
-    id: number;
-    op: string;
-    modelId?: string;
-    download?: boolean;
-  }
-  const w = window as unknown as { speechReqs: Req[]; Worker: typeof Worker };
-  const Real = w.Worker;
-  const cached = new Set(o.cached);
-  w.speechReqs = [];
-  class FakeSpeechWorker extends EventTarget {
-    postMessage(req: Req): void {
-      w.speechReqs.push({ ...req });
-      const answer = (reply: Record<string, unknown>, ms = 0) =>
-        setTimeout(
-          () => this.dispatchEvent(new MessageEvent("message", { data: { id: req.id, ...reply } })),
-          ms,
-        );
-      const id = req.modelId ?? "";
-      if (req.op === "cacheState") {
-        const complete = cached.has(id);
-        answer({ kind: "state", state: { cached: complete, complete, bytes: complete ? 1 : 0 } });
-      } else if (req.op === "load" && req.download) {
-        answer({ kind: "progress", progress: { progress: 0.5, text: "40 MB of 80 MB" } }, 100);
-        cached.add(id);
-        answer({ kind: "ok" }, 600);
-      } else if (req.op === "load" && !cached.has(id)) {
-        answer({ kind: "error", error: { name: "Error", message: `${id} is not downloaded` } });
-      } else if (req.op === "transcribe") {
-        answer({ kind: "text", text: o.text }, 50);
-      } else {
-        if (req.op === "remove") cached.delete(id);
-        answer({ kind: "ok" });
-      }
-    }
-    terminate(): void {}
-  }
-  w.Worker = new Proxy(Real, {
-    construct(target, args: [string | URL, WorkerOptions?]) {
-      if (String(args[0]).includes("speech-worker")) return new FakeSpeechWorker();
-      return Reflect.construct(target, args);
-    },
-  });
-}
-
-/**
- * Init script: the AI worker, faked. Every model is fully cached and every load
- * fails; each request's `op` is logged in `window.aiOps`. Other workers are real.
- */
-export function fakeAiWorker(): void {
-  const w = window as unknown as { aiOps: string[]; Worker: typeof Worker };
-  const Real = w.Worker;
-  w.aiOps = [];
-  class FakeAiWorker extends EventTarget {
-    postMessage(req: { id: number; op: string }): void {
-      w.aiOps.push(req.op);
-      const reply =
-        req.op === "cacheState"
-          ? { kind: "state", state: { cached: true, complete: true, bytes: 1 } }
-          : req.op === "load"
-            ? { kind: "error", error: { name: "Error", message: "GPU device lost" } }
-            : { kind: "ok" };
-      setTimeout(() =>
-        this.dispatchEvent(new MessageEvent("message", { data: { id: req.id, ...reply } })),
-      );
-    }
-    terminate(): void {}
-  }
-  w.Worker = new Proxy(Real, {
-    construct(target, args: [string | URL, WorkerOptions?]) {
-      if (String(args[0]).includes("ai-worker")) return new FakeAiWorker();
-      return Reflect.construct(target, args);
-    },
-  });
+/** Init script: merges `patch` into the stored settings (runs after `member`'s own). */
+export function storedSettings(patch: Record<string, unknown>): void {
+  const key = "veil.settings.v1";
+  const s = JSON.parse(localStorage.getItem(key) ?? "{}");
+  localStorage.setItem(key, JSON.stringify({ ...s, ...patch }));
 }
 
 /**
