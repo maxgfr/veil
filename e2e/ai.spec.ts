@@ -237,6 +237,34 @@ test("captions use the language picked in Settings, and a new pick restarts them
   await a.ctx.close();
 });
 
+test("speech recognition not yet on this site downloads from Settings, on the click", async ({
+  browser,
+}) => {
+  const a = await member(browser, {}, { locale: "en-US" });
+  await a.ctx.addInitScript(fakeSpeechSaying, "hello");
+  // Like Chrome: "downloadable" for this site until installed, and installed only from a click.
+  await a.ctx.addInitScript(() => {
+    const R = (window as unknown as { SpeechRecognition: Record<string, unknown> })
+      .SpeechRecognition;
+    let installed = false;
+    R.available = async () => (installed ? "available" : "downloadable");
+    R.install = async () => {
+      if (!navigator.userActivation.isActive)
+        throw new DOMException("Requires handling a user gesture", "NotAllowedError");
+      installed = true;
+      return true;
+    };
+  });
+  await createRoom(a, "Ada");
+  await a.page.getByRole("button", { name: "Settings", exact: true }).click();
+  await a.page.getByTestId("speech-check").click();
+  await a.page.getByTestId("speech-download").click();
+  await expect(a.page.getByTestId("ai-builtin-speech")).toContainText("Ready");
+
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
+});
+
 test("while the browser downloads speech recognition, captions say they are getting ready", async ({
   browser,
 }) => {

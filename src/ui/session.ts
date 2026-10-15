@@ -555,6 +555,8 @@ export class RoomSession {
   /** Records the call on this device: everyone is told through our presence. */
   async startRecording(): Promise<void> {
     if (this.recording.value !== "idle") return;
+    // The recording's transcript comes from our captions: ready them while the click lasts.
+    this.installCaptions();
     // The previous recording's sheet is closed by now: its files can go.
     this.recorder?.dispose();
     const recorder = new Recorder({
@@ -595,7 +597,18 @@ export class RoomSession {
   /** Turns our live captions on or off. */
   toggleCaptions(): void {
     this.captionsOn.value = !this.captionsOn.value;
+    if (this.captionsOn.value) this.installCaptions();
     this.publishRecording();
+  }
+
+  /**
+   * From a click: Chrome downloads speech recognition only while handling one, and an
+   * awaited probe could outlast it, so the download is asked at once (a no-op once installed).
+   */
+  private installCaptions(): void {
+    void this.transcriber.download().then((ok) => {
+      if (ok) this.syncTranscriber();
+    });
   }
 
   /** From a click: downloads our language's recognition, then captions start. */
