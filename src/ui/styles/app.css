@@ -2069,3 +2069,78 @@ textarea.input {
 .recording-note {
   flex-basis: 100%;
 }
+
+/* ── scheduled meetings ───────────────────────────────────────────────── */
+.home-schedule {
+  grid-column: 1 / -1;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.schedule-grid .input {
+  min-width: 0;
+}
+
+.upcoming {
+  width: min(440px, 100% - 32px);
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.upcoming-title {
+  font-size: 15px;
+}
+
+.meetings {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.meeting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.meeting + .meeting {
+  border-top: 1px solid var(--line);
+}
+
+.meeting-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.meeting-title {
+  max-width: 100%;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.meeting-status {
+  margin-top: 4px;
+}
+
+.meeting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.meeting-remove {
+  margin-left: auto;
+}
