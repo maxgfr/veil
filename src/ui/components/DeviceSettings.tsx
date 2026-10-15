@@ -73,18 +73,24 @@ export function DeviceSelect(props: {
   onChange: (id: string) => void;
 }): JSX.Element {
   const label = props.kind === "audio" ? "Microphone" : "Camera";
-  // A saved device that is not plugged in shows as the default it will fall back to.
-  const value = props.devices.some((d) => d.id === props.value) ? props.value : "";
+  // A saved device the list doesn't show (unplugged, or names not allowed yet) keeps its own
+  // option: shown as "System default", picking the default would change nothing.
+  const unlisted = props.value !== "" && !props.devices.some((d) => d.id === props.value);
   return (
     <label class="field">
       <span class="label">{label}</span>
       <select
         class="input"
-        value={value}
+        value={props.value}
         data-testid={props.kind === "audio" ? "select-mic" : "select-cam"}
         onChange={(e) => props.onChange(e.currentTarget.value)}
       >
         <option value="">System default</option>
+        {unlisted && (
+          <option value={props.value}>
+            {props.kind === "audio" ? "Microphone chosen earlier" : "Camera chosen earlier"}
+          </option>
+        )}
         {props.devices.map((d) => (
           <option key={d.id} value={d.id}>
             {d.label}

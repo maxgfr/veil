@@ -93,3 +93,27 @@ test("turning the microphone on in a room uses the selected device, and switchin
     await expect(a.page.getByTestId("room")).toHaveAttribute("data-mic-device", "default");
   await a.ctx.close();
 });
+
+test("a saved microphone that isn't listed can be switched back to the system default", async ({
+  browser,
+}) => {
+  const a = await member(browser);
+  // Runs after `member`'s own settings: a microphone this browser doesn't list.
+  await a.ctx.addInitScript(() => {
+    const key = "veil.settings.v1";
+    const s = JSON.parse(localStorage.getItem(key) ?? "{}");
+    localStorage.setItem(key, JSON.stringify({ ...s, audioDevice: "gone-mic" }));
+  });
+  await a.page.goto("http://localhost:4173/?nosw");
+  await a.page.getByRole("button", { name: "Settings" }).click();
+  const select = a.page.getByTestId("select-mic");
+  await expect(select).toHaveValue("gone-mic");
+  await expect(select.locator("option:checked")).toHaveText("Microphone chosen earlier");
+
+  await select.selectOption({ label: "System default" });
+  const saved = await a.page.evaluate(
+    () => JSON.parse(localStorage.getItem("veil.settings.v1") ?? "{}").audioDevice,
+  );
+  expect(saved).toBe("");
+  await a.ctx.close();
+});
