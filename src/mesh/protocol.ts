@@ -29,7 +29,8 @@ const isId = (x: unknown): x is string => isStr(x, 64) && /^[A-Za-z0-9_-]{8,64}$
 // ── ctrl ────────────────────────────────────────────────────────────────────
 
 export type CtrlMessage =
-  | { t: "hs"; v: number; edPub: string; xPub: string; sig: string }
+  | { t: "hs"; v: number; edPub: string; xPub: string; sig: string; commit?: string; csig?: string }
+  | { t: "sas"; nonce: string }
   | { t: "sdp"; type: "offer" | "answer"; sdp: string }
   | { t: "ping"; ts: number }
   | { t: "pong"; ts: number }
@@ -40,10 +41,26 @@ export type CtrlMessage =
 export function decodeCtrl(x: unknown): CtrlMessage | null {
   if (!isObj(x)) return null;
   switch (x.t) {
-    case "hs":
-      return isInt(x.v) && isB64(x.edPub, 64) && isB64(x.xPub, 64) && isB64(x.sig, 128)
-        ? { t: "hs", v: x.v, edPub: x.edPub, xPub: x.xPub, sig: x.sig }
-        : null;
+    case "hs": {
+      if (!isInt(x.v) || !isB64(x.edPub, 64) || !isB64(x.xPub, 64) || !isB64(x.sig, 128))
+        return null;
+      const hs: Extract<CtrlMessage, { t: "hs" }> = {
+        t: "hs",
+        v: x.v,
+        edPub: x.edPub,
+        xPub: x.xPub,
+        sig: x.sig,
+      };
+      // The SAS commitment (32 bytes) and its signature (64 bytes) come together or not at all.
+      if (x.commit !== undefined || x.csig !== undefined) {
+        if (!isB64(x.commit, 43) || x.commit.length !== 43 || !isB64(x.csig, 86)) return null;
+        hs.commit = x.commit;
+        hs.csig = x.csig;
+      }
+      return hs;
+    }
+    case "sas":
+      return isB64(x.nonce, 43) && x.nonce.length === 43 ? { t: "sas", nonce: x.nonce } : null;
     case "sdp":
       return (x.type === "offer" || x.type === "answer") && isStr(x.sdp, 65536)
         ? { t: "sdp", type: x.type, sdp: x.sdp }

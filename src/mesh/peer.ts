@@ -310,6 +310,8 @@ export class Peer {
         edPub: toB64u(hs.hello.edPub),
         xPub: toB64u(hs.hello.xPub),
         sig: toB64u(hs.hello.sig),
+        commit: toB64u(hs.hello.commit),
+        csig: toB64u(hs.hello.csig),
       };
       // The connection may have been closed while the keys were generated.
       if (this.state !== "closed" && this.channels.ctrl.readyState === "open") {
@@ -328,6 +330,9 @@ export class Peer {
         edPub: fromB64u(msg.edPub),
         xPub: fromB64u(msg.xPub),
         sig: fromB64u(msg.sig),
+        ...(msg.commit && msg.csig
+          ? { commit: fromB64u(msg.commit), csig: fromB64u(msg.csig) }
+          : {}),
       });
       const labels = Object.keys(CHANNELS) as ChannelLabel[];
       const chans = await Promise.all(labels.map((l) => session.channel(l)));
@@ -337,6 +342,9 @@ export class Peer {
       this.secure = session;
       this.lastHeard = Date.now();
       this.setState("connected");
+      // The peer has committed to its SAS nonce (in its hello): ours can be revealed now.
+      if (session.sas.remoteCommit)
+        void this.sendCtrl({ t: "sas", nonce: toB64u(session.sas.nonce) });
     } catch (err) {
       this.log(err);
       this.close("handshake failed");
@@ -395,7 +403,10 @@ export class Peer {
     else if (msg.t === "pong") this.rtt = Date.now() - msg.ts;
     else if (msg.t === "sdp") void this.acceptRemote({ type: msg.type, sdp: msg.sdp });
     else if (msg.t === "bye") this.close("left");
-    else this.events.ctrl(this, msg);
+    else if (msg.t === "sas") {
+      // A nonce that does not open the peer's commitment: it changed its mind after seeing ours.
+      if (!(await this.secure?.reveal(fromB64u(msg.nonce)))) this.close("sas commit mismatch");
+    } else this.events.ctrl(this, msg);
   }
 
   /** Encrypts and sends, in order. Resolves once handed to the DataChannel. */

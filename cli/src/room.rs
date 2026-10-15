@@ -22,11 +22,13 @@ const MEMBER_TIMEOUT: Duration = Duration::from_secs(35);
 const MAX_SKEW_MS: u64 = 5 * 60_000;
 const TTL: u64 = 10;
 
+/// `Sas` carries the emojis to compare with a linked member, or None when it predates the SAS commitment.
 #[derive(Debug)]
 pub enum RoomEvent {
     MemberJoined { peer_id: String, nick: String },
     MemberLeft { nick: String },
-    LinkUp { peer_id: String, sas: String },
+    LinkUp { peer_id: String },
+    Sas { peer_id: String, sas: Option<String> },
     LinkDown { peer_id: String },
     App { author: String, msg: Value },
     File { peer_id: String, frame: Frame },
@@ -393,7 +395,7 @@ impl Room {
         let Some(id) = self.keys_by_slot.get(&key).cloned() else { return };
         match ev {
             PeerEvent::Signal { kind, sdp } => self.route_signal(&id, kind, sdp),
-            PeerEvent::Connected { remote_ed_pub, local_fp, remote_fp } => {
+            PeerEvent::Connected { outdated } => {
                 if let Some(s) = self.peers.get_mut(&id) {
                     s.ready = true;
                 }
@@ -412,13 +414,23 @@ impl Room {
                 if self.members.contains_key(&id) {
                     self.send_key_to(&id);
                 }
-                let sas = compute_sas(
-                    &self.secrets.sas_salt,
-                    &SasParty { peer_id: &self.id.peer_id, ed_pub: &self.id.ed_pub, fingerprint: &local_fp },
-                    &SasParty { peer_id: &id, ed_pub: &remote_ed_pub, fingerprint: &remote_fp },
-                );
+                self.emit(RoomEvent::LinkUp { peer_id: id.clone() });
+                if outdated {
+                    self.emit(RoomEvent::Sas { peer_id: id, sas: None });
+                }
+            }
+            PeerEvent::Sas { remote_ed_pub, local_fp, remote_fp, local_nonce, remote_nonce } => {
+                let me = SasParty {
+                    peer_id: &self.id.peer_id,
+                    ed_pub: &self.id.ed_pub,
+                    fingerprint: &local_fp,
+                    nonce: &local_nonce,
+                };
+                let them =
+                    SasParty { peer_id: &id, ed_pub: &remote_ed_pub, fingerprint: &remote_fp, nonce: &remote_nonce };
+                let sas = compute_sas(&self.secrets.sas_salt, &me, &them);
                 let sas = sas.iter().map(|(e, n)| format!("{e} {n}")).collect::<Vec<_>>().join("  ");
-                self.emit(RoomEvent::LinkUp { peer_id: id, sas });
+                self.emit(RoomEvent::Sas { peer_id: id, sas: Some(sas) });
             }
             PeerEvent::Ctrl(v) => {
                 if v["t"] == "roster" {

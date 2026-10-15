@@ -6,13 +6,12 @@
 //! Each peer runs as an actor task; the room talks to it with `PeerCmd` and
 //! hears back through `PeerEvent`.
 
-use crate::crypto::{b64u, from_b64u, hkdf32, normalize_fingerprint, sdp_fingerprint, sha256};
-use crate::identity::{peer_id_of, Identity};
+use crate::crypto::{b64u, from_b64u, hkdf32, normalize_fingerprint, random, sas_commit, sdp_fingerprint, sha256};
+use crate::identity::{peer_id_of, verify, Identity};
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{anyhow, bail, Result};
 use bytes::BytesMut;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -122,6 +121,14 @@ fn transcript(bind_key: &[u8], x_pub: &[u8], own_fp: &str, other_fp: &str) -> Ve
     t
 }
 
+/// The SAS commitment gets its own signature, so `sig` stays verifiable by peers that predate it.
+fn commit_transcript(t: &[u8], commit: &[u8]) -> Vec<u8> {
+    let mut out = b"veil/hs-commit/v1".to_vec();
+    out.extend_from_slice(t);
+    out.extend_from_slice(commit);
+    out
+}
+
 /// Inputs of the pairwise session derivation (both ends of one DTLS association).
 pub struct SessionInputs<'a> {
     pub shared: &'a [u8],
@@ -162,10 +169,17 @@ pub enum PeerEvent {
         kind: &'static str,
         sdp: String,
     },
+    /// `outdated`: the peer predates the SAS commitment, so no emojis can be trusted.
     Connected {
+        outdated: bool,
+    },
+    /// The peer revealed the SAS nonce it had committed to: the emojis can be computed.
+    Sas {
         remote_ed_pub: Vec<u8>,
         local_fp: String,
         remote_fp: String,
+        local_nonce: [u8; 32],
+        remote_nonce: [u8; 32],
     },
     Ctrl(Value),
     Gossip(Value),
@@ -241,6 +255,10 @@ struct Actor {
     connected: bool,
     secure: Option<Vec<SecureChannel>>,
     hs: Option<(EphemeralSecret, [u8; 32])>,
+    /// Our SAS nonce (committed to in our hello) and the peer's commitment, if it sent one.
+    sas_nonce: [u8; 32],
+    remote_commit: Option<[u8; 32]>,
+    sas_revealed: bool,
     local_fp: String,
     remote_fp: String,
     remote_ed_pub: Vec<u8>,
@@ -286,6 +304,9 @@ async fn run(
         connected: false,
         secure: None,
         hs: None,
+        sas_nonce: random(),
+        remote_commit: None,
+        sas_revealed: false,
         local_fp: String::new(),
         remote_fp: String::new(),
         remote_ed_pub: Vec::new(),
@@ -487,8 +508,14 @@ impl Actor {
         }
         let secret = EphemeralSecret::random_from_rng(rand::rngs::OsRng);
         let x_pub = PublicKey::from(&secret).to_bytes();
-        let sig = self.opts.identity.sign(&transcript(&self.opts.bind_key, &x_pub, &self.local_fp, &self.remote_fp));
-        let hello = json!({"t": "hs", "v": 1, "edPub": b64u(&self.opts.identity.ed_pub), "xPub": b64u(&x_pub), "sig": b64u(&sig)});
+        let t = transcript(&self.opts.bind_key, &x_pub, &self.local_fp, &self.remote_fp);
+        let commit = sas_commit(&self.sas_nonce);
+        let sig = self.opts.identity.sign(&t);
+        let csig = self.opts.identity.sign(&commit_transcript(&t, &commit));
+        let hello = json!({
+            "t": "hs", "v": 1, "edPub": b64u(&self.opts.identity.ed_pub), "xPub": b64u(&x_pub), "sig": b64u(&sig),
+            "commit": b64u(&commit), "csig": b64u(&csig),
+        });
         self.hs = Some((secret, x_pub));
         if let Some(dc) = self.dcs.get(CTRL) {
             let _ = dc.send_text(&hello.to_string()).await;
@@ -510,12 +537,22 @@ impl Actor {
         if peer_id_of(&ed_pub) != self.opts.remote_id {
             bail!("identity mismatch");
         }
-        let vk = VerifyingKey::from_bytes(&ed_pub.clone().try_into().map_err(|_| anyhow!("bad key"))?)?;
-        vk.verify(
-            &transcript(&self.opts.bind_key, &their_x, &self.remote_fp, &self.local_fp),
-            &Signature::from_bytes(&sig),
-        )
-        .map_err(|_| anyhow!("bad signature"))?;
+        let t = transcript(&self.opts.bind_key, &their_x, &self.remote_fp, &self.local_fp);
+        if !verify(&ed_pub, &sig, &t) {
+            bail!("bad signature");
+        }
+        // The SAS commitment and its signature come together, or not at all (older peers).
+        let remote_commit = match (v["commit"].as_str(), v["csig"].as_str()) {
+            (None, None) => None,
+            (Some(commit), Some(csig)) => {
+                let commit: [u8; 32] = from_b64u(commit)?.try_into().map_err(|_| anyhow!("bad commit"))?;
+                if !verify(&ed_pub, &from_b64u(csig)?, &commit_transcript(&t, &commit)) {
+                    bail!("bad signature");
+                }
+                Some(commit)
+            }
+            _ => bail!("bad commit"),
+        };
         let (secret, my_x) = self.hs.take().ok_or_else(|| anyhow!("no handshake"))?;
         let shared = secret.diffie_hellman(&PublicKey::from(their_x));
         if shared.as_bytes().iter().all(|b| *b == 0) {
@@ -533,14 +570,13 @@ impl Actor {
             remote_fp: &self.remote_fp,
         }));
         self.remote_ed_pub = ed_pub;
-        let _ = self.events.send((
-            self.key,
-            PeerEvent::Connected {
-                remote_ed_pub: self.remote_ed_pub.clone(),
-                local_fp: self.local_fp.clone(),
-                remote_fp: self.remote_fp.clone(),
-            },
-        ));
+        self.remote_commit = remote_commit;
+        let _ = self.events.send((self.key, PeerEvent::Connected { outdated: remote_commit.is_none() }));
+        // The peer has committed to its SAS nonce (in its hello): ours can be revealed now.
+        if remote_commit.is_some() {
+            let nonce = b64u(&self.sas_nonce);
+            self.send(CTRL, &Frame::Json(json!({"t": "sas", "nonce": nonce}))).await;
+        }
         for (i, data) in std::mem::take(&mut self.pending) {
             if self.on_secure_message(i, &data).await.is_some() {
                 break;
@@ -567,6 +603,27 @@ impl Actor {
                 }
                 Some("pong") => {}
                 Some("bye") => return Some("left".into()),
+                Some("sas") => {
+                    // A nonce that does not open the peer's commitment: it changed its mind after seeing ours.
+                    // Malformed: ignored, as the web app's decoder does.
+                    let nonce = from_b64u(v["nonce"].as_str().unwrap_or_default()).ok()?;
+                    let nonce: [u8; 32] = nonce.try_into().ok()?;
+                    if self.remote_commit != Some(sas_commit(&nonce)) {
+                        return Some("sas commit mismatch".into());
+                    }
+                    if !std::mem::replace(&mut self.sas_revealed, true) {
+                        let _ = self.events.send((
+                            self.key,
+                            PeerEvent::Sas {
+                                remote_ed_pub: self.remote_ed_pub.clone(),
+                                local_fp: self.local_fp.clone(),
+                                remote_fp: self.remote_fp.clone(),
+                                local_nonce: self.sas_nonce,
+                                remote_nonce: nonce,
+                            },
+                        ));
+                    }
+                }
                 Some("sdp") => {
                     let kind = v["type"].as_str().unwrap_or_default().to_string();
                     let sdp = v["sdp"].as_str().unwrap_or_default().to_string();

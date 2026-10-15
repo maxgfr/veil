@@ -6,6 +6,7 @@ const party = (peerId: string, fingerprint: string): SasParty => ({
   peerId,
   edPub: randomBytes(32),
   fingerprint,
+  nonce: randomBytes(32),
 });
 
 describe("sas", () => {
@@ -24,7 +25,7 @@ describe("sas", () => {
     expect(sa).toEqual(sb);
   });
 
-  test("a different fingerprint, key or room changes the SAS", async () => {
+  test("a different fingerprint, key, nonce or room changes the SAS", async () => {
     const salt = randomBytes(32);
     const a = party("aaaa", "sha-256 AA:01");
     const b = party("bbbb", "sha-256 BB:02");
@@ -32,6 +33,8 @@ describe("sas", () => {
     const variants = await Promise.all([
       computeSas(salt, a, { ...b, fingerprint: "sha-256 BB:03" }),
       computeSas(salt, a, { ...b, edPub: randomBytes(32) }),
+      computeSas(salt, a, { ...b, nonce: randomBytes(32) }),
+      computeSas(salt, { ...a, nonce: randomBytes(32) }, b),
       computeSas(randomBytes(32), a, b),
     ]);
     // 24-bit SAS: a collision here would be a 1-in-16M event per variant.

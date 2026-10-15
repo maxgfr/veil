@@ -2,7 +2,7 @@
 
 use crate::crypto::{b64u, from_b64u, hkdf32, open, random, seal, sha256};
 use anyhow::{anyhow, bail, Result};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -24,10 +24,11 @@ pub fn peer_id_of(ed_pub: &[u8]) -> String {
     hex::encode(sha256(&data))[..20].to_string()
 }
 
+/// Strict Ed25519 verification: rejects small-order keys and non-canonical signatures.
 pub fn verify(ed_pub: &[u8], sig: &[u8], data: &[u8]) -> bool {
     let (Ok(pk), Ok(sig)) = (<[u8; 32]>::try_from(ed_pub), <[u8; 64]>::try_from(sig)) else { return false };
     let Ok(vk) = VerifyingKey::from_bytes(&pk) else { return false };
-    vk.verify(data, &Signature::from_bytes(&sig)).is_ok()
+    vk.verify_strict(data, &Signature::from_bytes(&sig)).is_ok()
 }
 
 impl Identity {

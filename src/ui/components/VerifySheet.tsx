@@ -9,16 +9,31 @@ export function VerifySheet(props: {
   session: RoomSession;
   onClose: () => void;
 }): JSX.Element {
-  const [sas, setSas] = useState<Sas | null>(null);
+  // undefined while the emojis are being computed (the peer's nonce may still be on the way).
+  const [sas, setSas] = useState<Sas | "outdated" | null | undefined>(undefined);
   const id = props.peerId;
   useEffect(() => {
-    setSas(null);
-    if (id) void props.session.sas(id).then(setSas);
+    setSas(undefined);
+    if (!id) return;
+    let live = true;
+    void props.session.sas(id).then((s) => {
+      if (live) setSas(s);
+    });
+    return () => {
+      live = false;
+    };
   }, [id]);
   const nick = id ? props.session.nickOf(id) : "";
   return (
     <Sheet open={!!id} onClose={props.onClose} title={`Verify ${nick}`} testid="verify-sheet">
-      {!sas ? (
+      {sas === undefined ? (
+        <p class="muted">Waiting for {nick}…</p>
+      ) : sas === "outdated" ? (
+        <p class="muted" data-testid="sas-outdated">
+          {nick} uses an older version of Veil, so the emojis can't be trusted yet. Ask them to
+          reload the page, then try again.
+        </p>
+      ) : !sas ? (
         <p class="muted">
           You need a direct connection with {nick} to verify. Try again in a moment.
         </p>

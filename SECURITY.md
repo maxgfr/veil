@@ -73,6 +73,22 @@ fingerprints: if you compare them over another channel (voice, in person) and
 they match, there is no one in the middle. "They don't match" disconnects that
 member.
 
+24 bits are only enough if nobody can choose what goes into them. Someone in
+the middle picks their own keys, and could otherwise do so after seeing both
+members' keys, then search for two identities whose emojis collide (about 2¹²
+tries per side, a few milliseconds). So each side also draws a random 32-byte
+nonce and commits to it in its signed handshake hello
+(`SHA-256("veil/sas-commit/v1" || nonce)`), then reveals the nonce over the
+encrypted channel only once it holds the other side's commitment. A nonce that
+does not open its commitment drops the connection. The emojis are an HMAC,
+keyed by the room's SAS salt, over both identities, both fingerprints and both
+nonces: whoever sits in the middle has to commit before learning the nonce
+that decides the result, so each attempt has a 1 in 2²⁴ chance, and a failed
+attempt shows up as emojis that don't match.
+
+A member running a version from before the commitment can still connect, but
+Verify shows no emojis for them, only a note that they need to update.
+
 ## Browser hardening
 
 - Strict CSP in a `<meta>` tag: `default-src 'none'`, scripts and styles from
@@ -110,6 +126,11 @@ member.
   Treat it like a key.
 - **Ephemeral identities**: there are no long-term identities, so verification
   holds for the session only.
+- **Scheduled meetings keep the key**: a scheduled meeting's link, and so its
+  room key, sits unencrypted in `localStorage` until you delete the meeting or
+  12 hours after it ends.
+  Anyone who can read this browser's storage (malware, a shared account) can
+  join that room.
 - **No forward secrecy inside a sender-key period**: a member who stays in the
   room can decrypt everything sent under keys they received. Rotation bounds
   this to 10 minutes or 10,000 messages and cuts off departed members.

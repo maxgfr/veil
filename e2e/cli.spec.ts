@@ -125,6 +125,20 @@ test("the CLI and a browser chat in the same room", async ({ browser }) => {
     .toContain("[Browser] hello terminal");
   cli.write("hello browser");
   await expect(a.page.getByTestId("messages")).toContainText("hello browser", { timeout: 20_000 });
+
+  // Both ends show the same verification emojis ("verify together with Browser: 🐶 Dog  🐱 Cat  …").
+  const prefix = "verify together with Browser: ";
+  await expect.poll(() => cli.stderr.join("\n"), { timeout: 20_000 }).toContain(prefix);
+  const line = cli.stderr.find((l) => l.includes(prefix)) as string;
+  const cliNames = line
+    .slice(line.indexOf(prefix) + prefix.length)
+    .split("  ")
+    .map((s) => s.slice(s.indexOf(" ") + 1));
+  await a.page.getByRole("button", { name: "People", exact: true }).click();
+  await a.page.getByTestId("verify").first().click();
+  await expect(a.page.getByTestId("sas")).toBeVisible();
+  expect(await a.page.locator("[data-testid=sas] .sas-name").allInnerTexts()).toEqual(cliNames);
+  await a.page.keyboard.press("Escape");
   // The browser shows a delivery receipt from the CLI.
   await expect(a.page.locator(".msg.mine .receipt .tabular").first()).toHaveText("1", {
     timeout: 20_000,

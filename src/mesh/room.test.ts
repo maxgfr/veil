@@ -83,9 +83,11 @@ describe("room", () => {
     await until(
       () => a.room.readyIds().includes(b.room.peerId) && b.room.readyIds().includes(a.room.peerId),
     );
+    // Each side waits for the other's revealed nonce before showing anything.
     const [sa, sb] = await Promise.all([a.room.sas(b.room.peerId), b.room.sas(a.room.peerId)]);
-    expect(sa?.emojis.length).toBe(4);
-    expect(sa).toEqual(sb);
+    if (!sa || sa === "outdated") throw new Error(`no SAS: ${sa}`);
+    expect(sa.emojis.length).toBe(4);
+    expect(sb).toEqual(sa);
   }, 30_000);
 
   test("with a small degree, messages are relayed to members we are not linked to", async () => {

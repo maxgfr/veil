@@ -228,17 +228,28 @@ pub struct SasParty<'a> {
     pub peer_id: &'a str,
     pub ed_pub: &'a [u8],
     pub fingerprint: &'a str,
+    /// The party's SAS nonce, committed to in its handshake hello before the other one was revealed.
+    pub nonce: &'a [u8],
+}
+
+/// Commitment to a SAS nonce, as `sasCommit` in `src/crypto/session.ts`.
+pub fn sas_commit(nonce: &[u8]) -> [u8; 32] {
+    let mut data = b"veil/sas-commit/v1".to_vec();
+    data.extend_from_slice(nonce);
+    sha256(&data)
 }
 
 pub fn compute_sas(sas_salt: &[u8], a: &SasParty<'_>, b: &SasParty<'_>) -> Vec<(&'static str, &'static str)> {
     use hmac::{Hmac, Mac};
     let (lo, hi) = if a.peer_id < b.peer_id { (a, b) } else { (b, a) };
-    let mut msg = b"veil/sas/v1".to_vec();
+    let mut msg = b"veil/sas/v2".to_vec();
     msg.extend_from_slice(lo.ed_pub);
     msg.extend_from_slice(hi.ed_pub);
     msg.extend_from_slice(
         format!("{}|{}", normalize_fingerprint(lo.fingerprint), normalize_fingerprint(hi.fingerprint)).as_bytes(),
     );
+    msg.extend_from_slice(lo.nonce);
+    msg.extend_from_slice(hi.nonce);
     let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(sas_salt).expect("any key length");
     mac.update(&msg);
     let tag = mac.finalize().into_bytes();
@@ -369,15 +380,19 @@ mod interop {
         let v = vectors();
         let s = &v["sas"];
         let (ea, eb) = (h(&s["a"]["edPub"]), h(&s["b"]["edPub"]));
+        let (na, nb) = (h(&s["a"]["nonce"]), h(&s["b"]["nonce"]));
+        assert_eq!(sas_commit(&na).to_vec(), h(&s["commitA"]));
         let a = SasParty {
             peer_id: s["a"]["peerId"].as_str().unwrap(),
             ed_pub: &ea,
             fingerprint: s["a"]["fingerprint"].as_str().unwrap(),
+            nonce: &na,
         };
         let b = SasParty {
             peer_id: s["b"]["peerId"].as_str().unwrap(),
             ed_pub: &eb,
             fingerprint: s["b"]["fingerprint"].as_str().unwrap(),
+            nonce: &nb,
         };
         let names: Vec<&str> = compute_sas(&h(&s["salt"]), &a, &b).iter().map(|(_, n)| *n).collect();
         let expected: Vec<&str> = s["names"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect();
