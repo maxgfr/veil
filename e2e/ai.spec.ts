@@ -129,6 +129,39 @@ test("a stopped recording makes meeting notes on the device and saves them as Ma
   await a.ctx.close();
 });
 
+test("recording with the microphone on downloads speech recognition in the click, and transcribes", async ({
+  browser,
+}) => {
+  const a = await member(browser);
+  await a.ctx.addInitScript(fakeSpeechSaying, "hello from ada");
+  // Like Chrome: "downloadable" for this site until installed, and installed only in a click.
+  await a.ctx.addInitScript(() => {
+    const R = (window as unknown as { SpeechRecognition: Record<string, unknown> })
+      .SpeechRecognition;
+    let installed = false;
+    R.available = async () => (installed ? "available" : "downloadable");
+    R.install = async () => {
+      if (window.event?.type !== "click")
+        throw new DOMException("Requires handling a user gesture", "NotAllowedError");
+      installed = true;
+      return true;
+    };
+  });
+  await createRoom(a, "Ada");
+  await a.page.getByTestId("toggle-mic").click();
+  await expect(a.page.getByTestId("toggle-mic")).toHaveAttribute("aria-pressed", "true");
+  await a.page.getByTestId("toggle-record").click();
+  await a.page.waitForTimeout(2000);
+  await a.page.getByTestId("toggle-record").click();
+
+  await expect(a.page.getByTestId("recording-sheet")).toBeVisible();
+  const transcript = await download(a.page, "recording-transcript");
+  expect(transcript.toString("utf8")).toContain("hello from ada");
+
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
+});
+
 test("a phone screen fits the room with captions on, and the Recording sheet", async ({
   browser,
 }) => {
