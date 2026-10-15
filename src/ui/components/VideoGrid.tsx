@@ -85,6 +85,7 @@ export function VideoGrid(props: { session: RoomSession; members: MemberView[] }
               {!m.media.audio && <Icon name="micOff" size={14} label="Muted" />}
               <span>{m.self ? `${m.nick} (you)` : m.nick}</span>
               {m.media.screen && <span class="chip">Screen</span>}
+              {m.media.recording && <span class="chip chip-rec">REC</span>}
             </figcaption>
           </figure>
         );

@@ -109,6 +109,8 @@ export interface MediaState {
   audio: boolean;
   video: boolean;
   screen: boolean;
+  /** The author is recording the call locally. */
+  recording?: boolean;
 }
 
 /** Presence body (plaintext inside the mesh; every hop is pairwise-encrypted). */
@@ -145,6 +147,10 @@ export function decodePresence(x: unknown): Presence | null {
     links: x.links,
     joinedAt: x.joinedAt,
   };
+  if (m.recording !== undefined) {
+    if (typeof m.recording !== "boolean") return null;
+    out.media.recording = m.recording;
+  }
   if (x.keyId !== undefined) {
     if (!isInt(x.keyId, 0, 0xffffffff)) return null;
     out.keyId = x.keyId;
@@ -215,9 +221,12 @@ export type AppMessage =
   | { type: "typing"; on: boolean }
   | { type: "receipt"; ids: string[] }
   | { type: "file-offer"; id: string; name: string; size: number; mime: string }
-  | { type: "file-cancel"; id: string };
+  | { type: "file-cancel"; id: string }
+  /** A live caption line; `unavailable` says the author cannot caption (text is then empty). */
+  | { type: "caption"; ts: number; text: string; unavailable?: true };
 
 export const MAX_CHAT_LENGTH = 8000;
+export const MAX_CAPTION_LENGTH = 500;
 
 export function decodeApp(x: unknown): AppMessage | null {
   if (!isObj(x)) return null;
@@ -238,6 +247,15 @@ export function decodeApp(x: unknown): AppMessage | null {
         : null;
     case "file-cancel":
       return isId(x.id) ? { type: "file-cancel", id: x.id } : null;
+    case "caption": {
+      if (!isInt(x.ts) || !isStr(x.text, MAX_CAPTION_LENGTH)) return null;
+      if (x.unavailable === undefined) {
+        return x.text.length > 0 ? { type: "caption", ts: x.ts, text: x.text } : null;
+      }
+      return x.unavailable === true
+        ? { type: "caption", ts: x.ts, text: x.text, unavailable: true }
+        : null;
+    }
     default:
       return null;
   }

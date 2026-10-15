@@ -7,6 +7,7 @@ import { ControlBar, type SidePanel } from "../components/ControlBar";
 import { FilesPanel } from "../components/FilesPanel";
 import { hueOf, initials } from "../components/format";
 import { Icon } from "../components/Icons";
+import { RecordingSheet } from "../components/RecordingSheet";
 import { SettingsSheet } from "../components/SettingsSheet";
 import { ShareSheet } from "../components/ShareSheet";
 import { Sheet } from "../components/Sheet";
@@ -14,7 +15,13 @@ import { Toasts } from "../components/Toast";
 import { VerifySheet } from "../components/VerifySheet";
 import { VideoGrid } from "../components/VideoGrid";
 import { browserOnline, connectionSummary, LINK_LABEL } from "../connection";
-import type { MemberView, RoomSession } from "../session";
+import type { MemberView, RecordingFiles, RoomSession } from "../session";
+
+/** "Ada", "Ada and Bob", "Ada, Bob and Cy". */
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names.join("");
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
 
 function wideScreen(): boolean {
   return typeof matchMedia === "function" && matchMedia("(min-width: 900px)").matches;
@@ -37,6 +44,8 @@ export function Room(props: {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [verify, setVerify] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [recordingFiles, setRecordingFiles] = useState<RecordingFiles | null>(null);
+  const [leaveAfterRecording, setLeaveAfterRecording] = useState(false);
 
   const members = s.members();
   const others = members.filter((m) => !m.self);
@@ -47,6 +56,26 @@ export function Room(props: {
   const count = others.length === 0 ? "Waiting for others" : `${others.length + 1} in the room`;
   const online = s.transports.filter((t) => t.state === "online").map((t) => t.name);
   const e2eeMedia = inCall && s.mediaE2ee();
+  const recorders = members.filter((m) => m.media.recording).map((m) => m.nick);
+
+  const toggleRecording = async () => {
+    if (s.recording.value === "idle") return s.startRecording();
+    const done = await s.stopRecording();
+    if (done) setRecordingFiles(done);
+  };
+
+  // Leaving while recording stops it first and offers the files before going.
+  const leave = async () => {
+    if (s.recording.value !== "idle") {
+      const done = await s.stopRecording();
+      if (done) {
+        setRecordingFiles(done);
+        setLeaveAfterRecording(true);
+        return;
+      }
+    }
+    props.onLeave();
+  };
 
   useEffect(() => {
     const leave = () => void s.leave();
@@ -131,6 +160,18 @@ export function Room(props: {
             >
               <Icon name="file" size={14} />
               Files
+            </span>
+          )}
+          {recorders.length > 0 && (
+            <span
+              class="chip chip-rec"
+              role="img"
+              aria-label={`${joinNames(recorders)} ${recorders.length > 1 ? "are" : "is"} recording`}
+              title={`${joinNames(recorders)} ${recorders.length > 1 ? "are" : "is"} recording`}
+              data-testid="rec-indicator"
+            >
+              <span class="rec-dot" aria-hidden="true" />
+              REC
             </span>
           )}
           {e2eeMedia && (
@@ -254,7 +295,8 @@ export function Room(props: {
         mode={props.mode}
         side={side}
         onSide={setSide}
-        onLeave={props.onLeave}
+        onRecord={() => void toggleRecording()}
+        onLeave={() => void leave()}
       />
 
       {dragging && (
@@ -294,6 +336,14 @@ export function Room(props: {
         others={others}
         online={netOnline}
         summary={summary}
+      />
+      <RecordingSheet
+        files={recordingFiles}
+        onClose={() => {
+          setRecordingFiles(null);
+          setLeaveAfterRecording(false);
+        }}
+        onLeave={leaveAfterRecording ? props.onLeave : undefined}
       />
       <Toasts toasts={s.toasts} />
     </div>

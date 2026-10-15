@@ -9,6 +9,7 @@
 import { signal } from "@preact/signals";
 import { sha256 } from "../crypto/bytes";
 import { SAS_EMOJIS, type Sas } from "../crypto/sas";
+import { type Caption, speechRecognition, Transcriber } from "../features/captions";
 import { Chat, type ChatMessage } from "../features/chat";
 import {
   clearTemporaryFiles,
@@ -18,6 +19,7 @@ import {
   pickSink,
 } from "../features/files";
 import { detectE2ee, Media, rtcConfigFor } from "../features/media";
+import { Recorder, type RecorderSource, type RecordingUrls } from "../features/recorder";
 import type { PeerState } from "../mesh/peer";
 import type { AppMessage, MediaState } from "../mesh/protocol";
 import { type LinkInfo, type Member, Room } from "../mesh/room";
@@ -57,6 +59,13 @@ export interface Toast {
   tone: "info" | "warn" | "error";
 }
 
+export type RecordingState = "idle" | "recording" | "stopping";
+
+/** The files of a finished recording, with when it started (for their names). */
+export interface RecordingFiles extends RecordingUrls {
+  started: number;
+}
+
 const NO_MEDIA: MediaState = { audio: false, video: false, screen: false };
 
 export class RoomSession {
@@ -66,6 +75,7 @@ export class RoomSession {
   readonly unread = signal(0);
   /** Files offered to us while the Files view was not on screen. */
   readonly pendingFiles = signal(0);
+  readonly recording = signal<RecordingState>("idle");
   chatOpen = false;
   filesVisible = false;
   transports: TransportStatus[] = [];
@@ -84,6 +94,12 @@ export class RoomSession {
   private failures = 0;
   private everConnected = false;
   private left = false;
+  private recorder: Recorder | null = null;
+  /** Our camera (or screen) and microphone as one stream, kept stable for the recorder. */
+  private readonly selfStream = new MediaStream();
+  private readonly transcriber: Transcriber;
+  /** Who was recording at the last members update, to announce changes. */
+  private recordingMembers = new Set<string>();
 
   private constructor(
     readonly room: Room,
@@ -107,8 +123,11 @@ export class RoomSession {
       keys: room.keys,
       memberMedia: (id) => room.members.get(id)?.media,
       memberE2ee: (id) => room.members.get(id)?.e2ee ?? false,
-      publish: (state) => room.setMedia(state),
-      onChange: () => this.changed(),
+      publish: (state) => room.setMedia({ ...state, recording: this.isRecording }),
+      onChange: () => {
+        this.syncTranscriber();
+        this.changed();
+      },
       workerUrl: __E2EE_WORKER_URL__,
       // Read live: a device chosen in Settings during the call applies to the next capture.
       preferredDevices: () => ({
@@ -120,6 +139,11 @@ export class RoomSession {
           `The selected ${kind === "audio" ? "microphone" : "camera"} is unavailable: using the system default.`,
           "warn",
         ),
+    });
+    this.transcriber = new Transcriber({
+      Recognition: speechRecognition(),
+      lang: navigator.language,
+      send: (caption) => this.onOwnCaption(caption),
     });
   }
 
@@ -228,6 +252,14 @@ export class RoomSession {
     // Media is attached once we know the member (its E2EE capability comes with its presence).
     for (const peer of this.room.peers.values())
       if (peer.ready && this.room.members.has(peer.remoteId)) this.media.onLinkUp(peer);
+    const recording = new Set<string>();
+    for (const m of this.room.members.values()) if (m.media?.recording) recording.add(m.peerId);
+    for (const id of recording)
+      if (!this.recordingMembers.has(id)) this.toast(`${this.nickOf(id)} started recording`);
+    for (const id of this.recordingMembers)
+      if (!recording.has(id)) this.toast(`${this.nickOf(id)} stopped recording`);
+    this.recordingMembers = recording;
+    this.syncTranscriber();
     this.changed();
   }
 
@@ -262,6 +294,8 @@ export class RoomSession {
       }
     } else if (msg.type === "file-cancel") {
       this.files.onApp(author, msg);
+    } else if (msg.type === "caption") {
+      this.recorder?.addCaption(this.nickOf(author), msg.ts, msg.unavailable ? null : msg.text);
     } else {
       const before = this.chat.messages.length;
       this.chat.onApp(author, msg);
@@ -280,7 +314,7 @@ export class RoomSession {
         peerId: this.peerId,
         nick: this.params.nick || "You",
         self: true,
-        media: this.media.state(),
+        media: { ...this.media.state(), recording: this.isRecording },
         link: null,
         rtt: null,
         relayed: false,
@@ -440,6 +474,93 @@ export class RoomSession {
     return this.queueMedia(() => this.media.switchDevice(kind));
   }
 
+  private get isRecording(): boolean {
+    return this.recording.value === "recording";
+  }
+
+  /** Records the call on this device: everyone is told through our presence. */
+  async startRecording(): Promise<void> {
+    if (this.recording.value !== "idle") return;
+    // The previous recording's sheet is closed by now: its files can go.
+    this.recorder?.dispose();
+    const recorder = new Recorder({
+      sources: () => this.recorderSources(),
+      sink: (meta) => pickSink(meta, { preferPicker: false }),
+    });
+    this.recorder = recorder;
+    this.recording.value = "recording";
+    try {
+      await recorder.start();
+    } catch (err) {
+      console.warn("recording failed to start", err);
+      recorder.dispose();
+      this.recorder = null;
+      this.recording.value = "idle";
+      this.toast("Could not start recording.", "warn");
+    }
+    this.publishRecording();
+  }
+
+  /**
+   * Stops recording and returns its files, or null if nothing was recording.
+   * A call while already stopping waits for the same files.
+   */
+  async stopRecording(): Promise<RecordingFiles | null> {
+    const recorder = this.recorder;
+    if (!recorder || this.recording.value === "idle") return null;
+    if (this.recording.value === "recording") {
+      this.recording.value = "stopping";
+      this.publishRecording();
+    }
+    const urls = await recorder.stop();
+    this.recording.value = "idle";
+    this.changed();
+    return { ...urls, started: recorder.started };
+  }
+
+  private publishRecording(): void {
+    this.room.setMedia({ ...this.media.state(), recording: this.isRecording });
+    this.syncTranscriber();
+    this.changed();
+  }
+
+  /** Us first, then everyone whose media we receive. */
+  private recorderSources(): RecorderSource[] {
+    const want = [
+      ...this.media.preview.getVideoTracks(),
+      ...(this.media.micOn && this.media.audioTrack ? [this.media.audioTrack] : []),
+    ];
+    for (const t of this.selfStream.getTracks())
+      if (!want.includes(t)) this.selfStream.removeTrack(t);
+    const have = this.selfStream.getTracks();
+    for (const t of want) if (!have.includes(t)) this.selfStream.addTrack(t);
+    const out: RecorderSource[] = [
+      { id: this.peerId, nick: this.nickOf(this.peerId), stream: this.selfStream },
+    ];
+    for (const r of this.media.remote.values())
+      out.push({ id: r.peerId, nick: this.nickOf(r.peerId), stream: r.stream });
+    return out;
+  }
+
+  /** Captions run while anyone records and our microphone is on. */
+  private syncTranscriber(): void {
+    // Media can report a change before the constructor has created the transcriber.
+    if (!this.transcriber) return;
+    const wanted =
+      !this.left && this.media.micOn && (this.isRecording || this.recordingMembers.size > 0);
+    if (wanted) void this.transcriber.start();
+    else this.transcriber.stop();
+  }
+
+  private onOwnCaption(caption: Caption): void {
+    void this.room.send({ type: "caption", ...caption });
+    this.recorder?.addCaption(
+      this.nickOf(this.peerId),
+      caption.ts,
+      "unavailable" in caption ? null : caption.text,
+    );
+  }
+
   hangUp(): void {
     void this.queueMedia(async () => this.media.stop());
   }
@@ -456,6 +577,13 @@ export class RoomSession {
   async leave(): Promise<void> {
     if (this.left) return;
     this.left = true;
+    this.transcriber.stop();
+    if (this.recorder) {
+      await this.recorder.stop();
+      this.recorder.dispose();
+      this.recorder = null;
+      this.recording.value = "idle";
+    }
     this.media.dispose();
     this.files.dispose();
     this.chat.dispose();
