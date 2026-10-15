@@ -184,19 +184,25 @@ export function ChatPanel(props: { session: RoomSession; onClose?: () => void })
  * Without a language detector the action only shows on hover or focus.
  */
 function TheirText(props: { text: string }): JSX.Element {
+  // Read in render: a language picked in Settings re-checks and re-translates.
+  const mine = myLang();
   const [offer, setOffer] = useState<"no" | "known" | "unknown">("no");
   const [lang, setLang] = useState<string | null>(null);
-  const [translated, setTranslated] = useState<string | null>(null);
+  /** The last translation, with the language it is in. */
+  const [translated, setTranslated] = useState<{ to: string; text: string } | null>(null);
   const [showing, setShowing] = useState(false);
   const [busy, setBusy] = useState(false);
+  // A translation into another language than ours is stale: the original shows.
+  const current = translated?.to === mine ? translated.text : null;
+  const shown = showing && current !== null;
 
   const run = async (from: string | null) => {
     setBusy(true);
     try {
       const { translate } = await import("../../ai/tasks");
-      const text = await translate(props.text, from, myLang());
+      const text = await translate(props.text, from, mine);
       if (text !== null && text !== props.text) {
-        setTranslated(text);
+        setTranslated({ to: mine, text });
         setShowing(true);
       }
     } catch (err) {
@@ -208,12 +214,13 @@ function TheirText(props: { text: string }): JSX.Element {
 
   useEffect(() => {
     let live = true;
+    setOffer("no");
     void (async () => {
       const { canTranslate, detectLang } = await import("../../ai/tasks");
       const detector = "LanguageDetector" in globalThis;
       const from = detector ? await detectLang(props.text) : null;
-      if (!live || (detector && (from === null || from === myLang()))) return;
-      if (!(await canTranslate(from, myLang())) || !live) return;
+      if (!live || (detector && (from === null || from === mine))) return;
+      if (!(await canTranslate(from, mine)) || !live) return;
       setLang(from);
       setOffer(from === null ? "unknown" : "known");
       if (settings.value.ai.translateChat && from !== null) void run(from);
@@ -221,25 +228,25 @@ function TheirText(props: { text: string }): JSX.Element {
     return () => {
       live = false;
     };
-  }, [props.text]);
+  }, [props.text, mine]);
 
   return (
     <>
-      <div class="bubble" lang={showing ? myLang() : (lang ?? undefined)}>
-        {showing && translated ? translated : props.text}
+      <div class="bubble" lang={shown ? mine : (lang ?? undefined)}>
+        {shown ? current : props.text}
       </div>
       {offer !== "no" && (
         <button
           type="button"
-          class={`translate-msg${offer === "unknown" && !translated ? " on-hover" : ""}`}
+          class={`translate-msg${offer === "unknown" && !current ? " on-hover" : ""}`}
           disabled={busy}
           onClick={() => {
-            if (translated) setShowing(!showing);
+            if (current) setShowing(!showing);
             else void run(lang);
           }}
           data-testid="translate-msg"
         >
-          {showing ? "Show original" : busy ? "Translating…" : "Translate"}
+          {shown ? "Show original" : busy ? "Translating…" : "Translate"}
         </button>
       )}
     </>
