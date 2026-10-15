@@ -1,13 +1,18 @@
 import type { JSX } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { parseRoomLink, parseRoomMode, type RoomMode } from "../../crypto/room";
 import { Icon, Logo } from "../components/Icons";
 import { QrScanner } from "../components/QrScanner";
 import { Sheet } from "../components/Sheet";
+import { Upcoming } from "../components/Upcoming";
+
+type ScheduleView = typeof import("../components/ScheduleMeeting").ScheduleMeeting;
 
 export function Home(props: {
   onCreate: (passphrase: string, mode: RoomMode) => void;
   onJoin: (key: Uint8Array, passphrase: string, mode: RoomMode) => void;
+  /** A fresh room link, for a meeting scheduled for later. */
+  newLink: (mode: RoomMode) => string;
   onSettings: () => void;
 }): JSX.Element {
   const [link, setLink] = useState("");
@@ -16,6 +21,13 @@ export function Home(props: {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [about, setAbout] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [Schedule, setSchedule] = useState<{ C: ScheduleView } | null>(null);
+
+  useEffect(() => {
+    if (!scheduling || Schedule) return;
+    void import("../components/ScheduleMeeting").then((m) => setSchedule({ C: m.ScheduleMeeting }));
+  }, [scheduling, Schedule]);
 
   const join = (value: string) => {
     const key = parseRoomLink(value);
@@ -65,6 +77,15 @@ export function Home(props: {
           >
             <Icon name="attach" size={20} />
             Send files
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost home-schedule"
+            data-testid="schedule"
+            onClick={() => setScheduling(true)}
+          >
+            <Icon name="calendar" size={20} />
+            Schedule a meeting
           </button>
         </div>
 
@@ -147,6 +168,8 @@ export function Home(props: {
         </div>
       </section>
 
+      <Upcoming onJoin={join} />
+
       <ul class="pillars" aria-label="How Veil protects you">
         <li>
           <Icon name="shield" size={18} />
@@ -186,6 +209,19 @@ export function Home(props: {
               join(text);
             }}
           />
+        )}
+      </Sheet>
+
+      <Sheet
+        open={scheduling}
+        title="Schedule a meeting"
+        onClose={() => setScheduling(false)}
+        testid="schedule-sheet"
+      >
+        {Schedule ? (
+          <Schedule.C newLink={props.newLink} onClose={() => setScheduling(false)} />
+        ) : (
+          <p class="muted">Loading…</p>
         )}
       </Sheet>
 

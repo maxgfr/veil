@@ -97,10 +97,13 @@ member.
   since `frame-ancestors` cannot be set from a meta tag.
 - Remote text is only ever rendered as text, never as HTML. Every message
   received is validated against a typed schema; unknown messages are ignored.
-- No secret is persisted: `localStorage` only holds preferences (nickname,
-  transports, relays, STUN/TURN). Messages live in memory; received files go to
-  the location you choose, or to the origin's private storage until you save
-  them (cleared on the next visit).
+- Nothing of a conversation is persisted: `localStorage` only holds preferences
+  (nickname, transports, relays, STUN/TURN) and the meetings you schedule. A
+  scheduled meeting is stored with its link, so this device keeps its room key:
+  the same trust as the browser holding the open room, and it never leaves the
+  device (the `.ics` file is built in the page). Messages live in memory;
+  received files go to the location you choose, or to the origin's private
+  storage until you save them (cleared on the next visit).
 - Dependencies are pinned with a lockfile; GitHub Actions are pinned by commit.
 
 ## Known limits

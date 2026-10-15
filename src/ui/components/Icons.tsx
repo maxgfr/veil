@@ -28,6 +28,7 @@ const PATHS = {
   file: "M14 3H6v18h12V7z M14 3v4h4",
   link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
   plus: "M12 5v14 M5 12h14",
+  calendar: "M4 6h16v14H4z M4 10h16 M8 3v5 M16 3v5",
   lock: "M6 11h12v10H6z M8.5 11V7.5a3.5 3.5 0 0 1 7 0V11",
   arrowLeft: "M19 12H5 M11 6l-6 6 6 6",
   alert: "M12 4l9 16H3z M12 10v4 M12 17h.01",

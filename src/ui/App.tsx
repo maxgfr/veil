@@ -110,6 +110,7 @@ export function App(): JSX.Element {
       <Home
         onCreate={(passphrase, mode) => goLobby(newRoomKey(), passphrase, mode)}
         onJoin={(key, passphrase, mode) => goLobby(key, passphrase, mode)}
+        newLink={(mode) => linkFor(newRoomKey(), mode)}
         onSettings={() => setSettingsOpen(true)}
       />
     );

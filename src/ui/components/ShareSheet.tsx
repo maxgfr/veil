@@ -1,19 +1,11 @@
 import type { JSX } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import type { RoomSession } from "../session";
+import { CopyButton, copyText } from "./CopyButton";
 import { Icon } from "./Icons";
 import { QrCode } from "./QrCode";
 import { QrScanner } from "./QrScanner";
 import { Sheet } from "./Sheet";
-
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function ShareSheet(props: {
   open: boolean;
@@ -22,15 +14,8 @@ export function ShareSheet(props: {
   hasPassphrase: boolean;
   session: RoomSession;
 }): JSX.Element {
-  const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<"link" | "manual">("link");
   const canShare = typeof navigator.share === "function";
-
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1800);
-    return () => clearTimeout(t);
-  }, [copied]);
 
   return (
     <Sheet open={props.open} onClose={props.onClose} title="Invite people" testid="share-sheet">
@@ -67,14 +52,7 @@ export function ShareSheet(props: {
               data-testid="room-link"
               onFocus={(e) => e.currentTarget.select()}
             />
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onClick={async () => setCopied(await copyText(props.link))}
-            >
-              <Icon name={copied ? "check" : "copy"} size={18} />
-              {copied ? "Copied" : "Copy"}
-            </button>
+            <CopyButton text={props.link} />
           </div>
           {canShare && (
             <button
