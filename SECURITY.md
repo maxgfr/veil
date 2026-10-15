@@ -77,6 +77,14 @@ member.
 
 - Strict CSP in a `<meta>` tag: `default-src 'none'`, scripts and styles from
   `'self'` only, `connect-src 'self' wss:`, `require-trusted-types-for 'script'`.
+- On-device AI widens it by exactly what WebLLM needs, nothing else:
+  `'wasm-unsafe-eval'` in `script-src` (it compiles WebAssembly; JavaScript
+  `eval` stays blocked and Trusted Types stay required), and `connect-src` to
+  `https://huggingface.co`, `https://*.hf.co` (the weights and their CDN) and
+  `https://raw.githubusercontent.com` (the compiled model library). These are
+  downloads only: the model runs in a worker on the device, and no prompt,
+  transcript or message is ever sent anywhere. WebLLM is bundled into that
+  worker alone (the build checks it), never into the page.
 - No inline script or style, no third-party script, font, CDN or analytics.
   The build fails if the page has an inline script or an external URL.
 - `no-referrer`, and the app refuses to run inside a frame (clickjacking),

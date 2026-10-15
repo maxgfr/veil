@@ -1,6 +1,14 @@
 // Local speech-to-text: captions are produced on-device only, never by an online service.
 
-export type Caption = { ts: number; text: string } | { ts: number; text: ""; unavailable: true };
+export type Caption =
+  | { ts: number; text: string; lang?: string }
+  | { ts: number; text: ""; unavailable: true };
+
+/** Another on-device way to caption, tried when local speech recognition is unavailable. */
+export interface CaptionSource {
+  start(): Promise<void>;
+  stop(): void;
+}
 
 export type Availability = "available" | "downloadable" | "downloading" | "unavailable";
 
@@ -47,6 +55,7 @@ export class Transcriber {
   private active = false;
   private reportedUnavailable = false;
   private instance: RecognitionInstance | null = null;
+  private fallback: CaptionSource | null = null;
   /** Bumped by every start() and stop(), so a stale probe never listens. */
   private generation = 0;
 
@@ -55,6 +64,11 @@ export class Transcriber {
       Recognition: RecognitionConstructor | undefined;
       lang: string;
       send(caption: Caption): void;
+      /**
+       * Asked at each start that finds no local recognition (it may load a model first);
+       * null keeps the unavailable notice, which is only sent once this settles.
+       */
+      fallback?: () => CaptionSource | null | Promise<CaptionSource | null>;
       now?: () => number;
     },
   ) {}
@@ -66,8 +80,7 @@ export class Transcriber {
     const ready = await this.prepare();
     if (generation !== this.generation) return;
     if (!ready) {
-      this.active = false;
-      this.reportUnavailable();
+      await this.startFallback(generation);
       return;
     }
     this.listen();
@@ -76,6 +89,8 @@ export class Transcriber {
   stop(): void {
     this.active = false;
     this.generation++;
+    this.fallback?.stop();
+    this.fallback = null;
     const instance = this.instance;
     this.instance = null;
     if (!instance) return;
@@ -97,6 +112,32 @@ export class Transcriber {
     } catch {
       // A failed probe means no local model: online recognition is never an option.
       return false;
+    }
+  }
+
+  private async startFallback(generation: number): Promise<void> {
+    let fallback: CaptionSource | null = null;
+    try {
+      fallback = (await this.deps.fallback?.()) ?? null;
+    } catch (err) {
+      console.warn("fallback captions unavailable", err);
+    }
+    if (generation !== this.generation) return;
+    if (!fallback) {
+      this.active = false;
+      this.reportUnavailable();
+      return;
+    }
+    this.fallback = fallback;
+    try {
+      await fallback.start();
+    } catch (err) {
+      console.warn("fallback captions failed to start", err);
+      if (generation !== this.generation) return;
+      fallback.stop();
+      this.fallback = null;
+      this.active = false;
+      this.reportUnavailable();
     }
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type Availability,
   type Caption,
+  type CaptionSource,
   type RecognitionConstructor,
   type RecognitionInstance,
   type RecognitionResultEvent,
@@ -47,15 +48,34 @@ function fake(opts: {
   return { Recognition: FakeRecognition as RecognitionConstructor, instances, installs };
 }
 
-function setup(Recognition: RecognitionConstructor | undefined) {
+function setup(
+  Recognition: RecognitionConstructor | undefined,
+  fallback?: () => CaptionSource | null | Promise<CaptionSource | null>,
+) {
   const sent: Caption[] = [];
   const t = new Transcriber({
     Recognition,
     lang: "fr-FR",
     send: (c) => sent.push(c),
     now: () => 42,
+    ...(fallback ? { fallback } : {}),
   });
   return { t, sent };
+}
+
+function fakeSource(fails = false) {
+  const source = {
+    starts: 0,
+    stops: 0,
+    async start() {
+      source.starts++;
+      if (fails) throw new Error("no worklet");
+    },
+    stop() {
+      source.stops++;
+    },
+  };
+  return source;
 }
 
 function results(...items: [string, boolean][]): RecognitionResultEvent {
@@ -186,6 +206,80 @@ describe("transcriber", () => {
     await started;
     expect(instances).toHaveLength(0);
     expect(sent).toEqual([]);
+  });
+
+  test("without local recognition the fallback captions instead of the notice", async () => {
+    const source = fakeSource();
+    const { Recognition, instances } = fake({ status: "unavailable" });
+    const { t, sent } = setup(Recognition, () => source);
+    await t.start();
+    await t.start();
+    expect(source.starts).toBe(1);
+    expect(instances).toHaveLength(0);
+    expect(sent).toEqual([]);
+    t.stop();
+    expect(source.stops).toBe(1);
+  });
+
+  test("local recognition wins over the fallback", async () => {
+    let asked = 0;
+    const { Recognition, instances } = fake({ status: "available" });
+    const { t } = setup(Recognition, () => {
+      asked++;
+      return fakeSource();
+    });
+    await t.start();
+    expect(asked).toBe(0);
+    expect(instances).toHaveLength(1);
+  });
+
+  test("no fallback on offer keeps the unavailable notice", async () => {
+    const { t, sent } = setup(undefined, () => null);
+    await t.start();
+    expect(sent).toEqual(unavailable);
+  });
+
+  test("a fallback that loads first sends no notice meanwhile, then captions", async () => {
+    const source = fakeSource();
+    let resolve!: (s: CaptionSource | null) => void;
+    const { t, sent } = setup(undefined, () => new Promise((r) => (resolve = r)));
+    const started = t.start();
+    await Promise.resolve();
+    expect(sent).toEqual([]);
+    resolve(source);
+    await started;
+    expect(source.starts).toBe(1);
+    expect(sent).toEqual([]);
+  });
+
+  test("a fallback whose load fails reports unavailable once", async () => {
+    const { t, sent } = setup(undefined, async () => {
+      throw new Error("load failed");
+    });
+    await t.start();
+    await t.start();
+    expect(sent).toEqual(unavailable);
+  });
+
+  test("stop while the fallback loads never starts it", async () => {
+    const source = fakeSource();
+    let resolve!: (s: CaptionSource | null) => void;
+    const { t, sent } = setup(undefined, () => new Promise((r) => (resolve = r)));
+    const started = t.start();
+    await Promise.resolve();
+    t.stop();
+    resolve(source);
+    await started;
+    expect(source.starts).toBe(0);
+    expect(sent).toEqual([]);
+  });
+
+  test("a fallback that fails to start reports unavailable", async () => {
+    const source = fakeSource(true);
+    const { t, sent } = setup(undefined, () => source);
+    await t.start();
+    expect(source.stops).toBe(1);
+    expect(sent).toEqual(unavailable);
   });
 
   test("picks the standard or prefixed constructor", () => {

@@ -1,9 +1,11 @@
 import type { JSX } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { RoomSession } from "../session";
+import { settings } from "../settings";
 import { FileCard } from "./FileCard";
 import { formatTime, hueOf } from "./format";
 import { Icon } from "./Icons";
+import { myLang } from "./LiveCaptions";
 
 export function ChatPanel(props: { session: RoomSession; onClose?: () => void }): JSX.Element {
   const s = props.session;
@@ -93,6 +95,8 @@ export function ChatPanel(props: { session: RoomSession; onClose?: () => void })
               )}
               {view ? (
                 <FileCard view={view} session={s} />
+              ) : !m.mine ? (
+                <TheirText text={m.text} />
               ) : (
                 <div class="bubble">
                   {m.text}
@@ -172,5 +176,72 @@ export function ChatPanel(props: { session: RoomSession; onClose?: () => void })
         </button>
       </form>
     </section>
+  );
+}
+
+/**
+ * Someone else's message, with "Translate" when it is in another language.
+ * Without a language detector the action only shows on hover or focus.
+ */
+function TheirText(props: { text: string }): JSX.Element {
+  const [offer, setOffer] = useState<"no" | "known" | "unknown">("no");
+  const [lang, setLang] = useState<string | null>(null);
+  const [translated, setTranslated] = useState<string | null>(null);
+  const [showing, setShowing] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const run = async (from: string | null) => {
+    setBusy(true);
+    try {
+      const { translate } = await import("../../ai/tasks");
+      const text = await translate(props.text, from, myLang());
+      if (text !== null && text !== props.text) {
+        setTranslated(text);
+        setShowing(true);
+      }
+    } catch (err) {
+      console.warn("message translation failed", err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const { canTranslate, detectLang } = await import("../../ai/tasks");
+      const detector = "LanguageDetector" in globalThis;
+      const from = detector ? await detectLang(props.text) : null;
+      if (!live || (detector && (from === null || from === myLang()))) return;
+      if (!(await canTranslate(from, myLang())) || !live) return;
+      setLang(from);
+      setOffer(from === null ? "unknown" : "known");
+      if (settings.value.ai.translateChat && from !== null) void run(from);
+    })().catch((err) => console.warn("language check failed", err));
+    return () => {
+      live = false;
+    };
+  }, [props.text]);
+
+  return (
+    <>
+      <div class="bubble" lang={showing ? myLang() : (lang ?? undefined)}>
+        {showing && translated ? translated : props.text}
+      </div>
+      {offer !== "no" && (
+        <button
+          type="button"
+          class={`translate-msg${offer === "unknown" && !translated ? " on-hover" : ""}`}
+          disabled={busy}
+          onClick={() => {
+            if (translated) setShowing(!showing);
+            else void run(lang);
+          }}
+          data-testid="translate-msg"
+        >
+          {showing ? "Show original" : busy ? "Translating…" : "Translate"}
+        </button>
+      )}
+    </>
   );
 }

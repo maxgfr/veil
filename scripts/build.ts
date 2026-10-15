@@ -14,9 +14,11 @@ const ROOT = resolve(import.meta.dir, "..");
 
 export const CSP = [
   "default-src 'none'",
-  "script-src 'self'",
+  // WebLLM compiles WebAssembly; JavaScript eval stays blocked.
+  "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self'",
-  "connect-src 'self' wss:",
+  // On-device AI: model weights (Hugging Face and its CDN) and the compiled model library.
+  "connect-src 'self' wss: https://huggingface.co https://*.hf.co https://raw.githubusercontent.com",
   "img-src 'self' blob: data:",
   "media-src 'self' blob:",
   "worker-src 'self'",
@@ -50,6 +52,8 @@ export interface BuildResult {
   outdir: string;
   version: string;
   files: string[];
+  /** The AI worker, relative to outdir (not precached). */
+  aiWorker: string;
 }
 
 function fail(msg: string): never {
@@ -115,6 +119,35 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     worker.outputs.find((o) => o.kind === "entry-point") ?? fail("no worker output");
   const workerUrl = `./${relative(outdir, workerOut.path).split("\\").join("/")}`;
 
+  // The AI worker carries WebLLM (~2 MB gzip): never precached, the service worker
+  // caches it on first use.
+  const aiWorker = await Bun.build({
+    entrypoints: [join(ROOT, "src/workers/ai-worker.ts")],
+    outdir,
+    minify,
+    target: "browser",
+    format: "esm",
+    naming: { entry: "assets/[name]-[hash].[ext]" },
+  });
+  assertOk(aiWorker, "AI worker build");
+  const aiWorkerOut =
+    aiWorker.outputs.find((o) => o.kind === "entry-point") ?? fail("no AI worker output");
+  const aiWorkerUrl = `./${relative(outdir, aiWorkerOut.path).split("\\").join("/")}`;
+
+  // The PCM AudioWorklet (on-device transcription) loads from the same origin.
+  const pcmWorklet = await Bun.build({
+    entrypoints: [join(ROOT, "src/workers/pcm-worklet.ts")],
+    outdir,
+    minify,
+    target: "browser",
+    format: "esm",
+    naming: { entry: "assets/[name]-[hash].[ext]" },
+  });
+  assertOk(pcmWorklet, "PCM worklet build");
+  const pcmWorkletOut =
+    pcmWorklet.outputs.find((o) => o.kind === "entry-point") ?? fail("no PCM worklet output");
+  const pcmWorkletUrl = `./${relative(outdir, pcmWorkletOut.path).split("\\").join("/")}`;
+
   // 2. The app, from its HTML entrypoint.
   const app = await Bun.build({
     entrypoints: [join(ROOT, "index.html")],
@@ -126,6 +159,8 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     naming,
     define: {
       __E2EE_WORKER_URL__: JSON.stringify(workerUrl),
+      __AI_WORKER_URL__: JSON.stringify(aiWorkerUrl),
+      __PCM_WORKLET_URL__: JSON.stringify(pcmWorkletUrl),
       "process.env.NODE_ENV": JSON.stringify(minify ? "production" : "development"),
     },
   });
@@ -160,12 +195,16 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     naming: { entry: "sw.js" },
     define: {
       __SW_VERSION__: JSON.stringify(version),
-      __PRECACHE__: JSON.stringify(["./", ...files.map((f) => `./${f}`)]),
+      __PRECACHE__: JSON.stringify([
+        "./",
+        ...files.map((f) => `./${f}`).filter((f) => f !== aiWorkerUrl),
+      ]),
+      __AI_WORKER_URL__: JSON.stringify(aiWorkerUrl),
     },
   });
   assertOk(sw, "service worker build");
 
-  return { outdir, version, files: [...files, "sw.js"] };
+  return { outdir, version, files: [...files, "sw.js"], aiWorker: aiWorkerUrl.slice(2) };
 }
 
 if (import.meta.main) {
