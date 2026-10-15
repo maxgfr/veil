@@ -2,7 +2,8 @@
  * Local meeting recording.
  *
  *  - Every source (us and each peer) is drawn into a 1280×720 canvas grid,
- *    name under each tile, initials when there is no video track.
+ *    name under each tile, initials when there is no video track. A screen
+ *    share takes the stage instead, cameras in a strip under it.
  *  - All audio tracks are mixed through one AudioContext destination, resynced
  *    whenever the set of tracks changes.
  *  - Two MediaRecorders run on that mix: video + audio, and audio only. Their
@@ -44,6 +45,24 @@ export function gridLayout(n: number, w: number, h: number): Rect[] {
     rects.push({ x: offset + (i - row * cols) * tw, y: row * th, w: tw, h: th });
   }
   return rects;
+}
+
+export interface Spotlight {
+  screen: Rect;
+  cameras: Rect[];
+}
+
+/** The screen above, nCameras equal tiles in a centred strip along the bottom. */
+export function spotlightLayout(nCameras: number, w: number, h: number): Spotlight {
+  const n = Math.max(0, nCameras);
+  if (n === 0) return { screen: { x: 0, y: 0, w, h }, cameras: [] };
+  const sh = Math.floor(h / 5);
+  // 16:9 tiles at most, narrower when many cameras share the strip.
+  const tw = Math.min(Math.floor((sh * 16) / 9), Math.floor(w / n));
+  const offset = Math.floor((w - n * tw) / 2);
+  const cameras: Rect[] = [];
+  for (let i = 0; i < n; i++) cameras.push({ x: offset + i * tw, y: h - sh, w: tw, h: sh });
+  return { screen: { x: 0, y: 0, w, h: h - sh }, cameras };
 }
 
 const VIDEO_MIMES = [
@@ -111,6 +130,8 @@ export interface RecorderSource {
   id: string;
   nick: string;
   stream: MediaStream | null;
+  /** "screen" for a screen share; a camera (or no video) otherwise. */
+  kind?: "camera" | "screen";
 }
 
 export interface RecorderDeps {
@@ -302,9 +323,17 @@ export class Recorder {
     if (!ctx) return;
     ctx.fillStyle = "#111";
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
-    const rects = gridLayout(sources.length, WIDTH, HEIGHT);
+    const screen = sources.find((s) => s.kind === "screen");
+    let tiles = sources;
+    let rects = gridLayout(sources.length, WIDTH, HEIGHT);
+    if (screen) {
+      // One screen on stage; any other share joins the cameras in the strip.
+      tiles = [screen, ...sources.filter((s) => s !== screen)];
+      const spot = spotlightLayout(tiles.length - 1, WIDTH, HEIGHT);
+      rects = [spot.screen, ...spot.cameras];
+    }
     rects.forEach((r, i) => {
-      const s = sources[i];
+      const s = tiles[i];
       if (!s) return;
       const area = { x: r.x + 4, y: r.y + 4, w: r.w - 8, h: r.h - 8 - LABEL };
       ctx.fillStyle = "#222";

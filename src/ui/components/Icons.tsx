@@ -38,6 +38,11 @@ const PATHS = {
   sparkle:
     "M10 4l1.6 4.4L16 10l-4.4 1.6L10 16l-1.6-4.4L4 10l4.4-1.6z M18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8z",
   captions: "M3 5h18v14H3z M10.5 10a2.5 2.5 0 1 0 0 4 M17 10a2.5 2.5 0 1 0 0 4",
+  layout: "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z",
+  spotlight: "M3 4h18v11H3z M3 19h5 M10 19h4 M16 19h5",
+  fullscreen: "M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5",
+  fit: "M4 8V4h4 M20 8V4h-4 M4 16v4h4 M20 16v4h-4 M8 9h8v6H8z",
+  pin: "M9 4h6 M10 4v6l-3 4h10l-3-4V4 M12 14v6",
 } as const;
 
 export type IconName = keyof typeof PATHS;

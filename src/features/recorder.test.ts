@@ -7,6 +7,7 @@ import {
   Recorder,
   type Rect,
   recordingNames,
+  spotlightLayout,
 } from "./recorder";
 
 describe("gridLayout", () => {
@@ -52,6 +53,48 @@ describe("gridLayout", () => {
           expect(apart).toBe(true);
         }
     }
+  });
+});
+
+describe("spotlightLayout", () => {
+  test("no camera: the screen fills the canvas", () => {
+    expect(spotlightLayout(0, 1280, 720)).toEqual({
+      screen: { x: 0, y: 0, w: 1280, h: 720 },
+      cameras: [],
+    });
+  });
+
+  test("the screen is largest, and no tile overflows or overlaps", () => {
+    for (const n of [1, 3, 8]) {
+      const { screen, cameras } = spotlightLayout(n, 1280, 720);
+      expect(cameras).toHaveLength(n);
+      const rects = [screen, ...cameras];
+      for (const r of rects) {
+        expect(r.x).toBeGreaterThanOrEqual(0);
+        expect(r.y).toBeGreaterThanOrEqual(0);
+        expect(r.w).toBeGreaterThan(0);
+        expect(r.h).toBeGreaterThan(0);
+        expect(r.x + r.w).toBeLessThanOrEqual(1280);
+        expect(r.y + r.h).toBeLessThanOrEqual(720);
+      }
+      for (const c of cameras) expect(screen.w * screen.h).toBeGreaterThan(c.w * c.h);
+      for (let i = 0; i < rects.length; i++)
+        for (let j = i + 1; j < rects.length; j++) {
+          const a = rects[i] as Rect;
+          const b = rects[j] as Rect;
+          const apart =
+            a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+          expect(apart).toBe(true);
+        }
+    }
+  });
+
+  test("without a screen the grid is unchanged", () => {
+    expect(gridLayout(3, 1280, 720)).toEqual([
+      { x: 0, y: 0, w: 640, h: 360 },
+      { x: 640, y: 0, w: 640, h: 360 },
+      { x: 320, y: 360, w: 640, h: 360 },
+    ]);
   });
 });
 

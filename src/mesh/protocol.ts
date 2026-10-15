@@ -113,6 +113,8 @@ export interface MediaState {
   recording?: boolean;
   /** The author has live captions on (everyone shows a CC badge). */
   captions?: boolean;
+  /** The msid of the author's screen-share stream, while sharing on its own track. */
+  screenStream?: string;
 }
 
 /** Presence body (plaintext inside the mesh; every hop is pairwise-encrypted). */
@@ -128,7 +130,12 @@ export interface Presence {
   e2ee?: boolean;
   /** The author's current sender key id: members missing it ask again (heals partitions). */
   keyId?: number;
+  /** Optional features the author supports ("screen-track": screen and camera on separate tracks). */
+  caps?: string[];
 }
+
+/** A short lowercase capability name ("screen-track"). */
+const isCap = (v: unknown): v is string => isStr(v, 24) && /^[a-z0-9-]+$/.test(v);
 
 /** A BCP-47-shaped language tag ("en", "pt-BR"), at most 35 characters. */
 function isLangTag(v: unknown): v is string {
@@ -162,6 +169,10 @@ export function decodePresence(x: unknown): Presence | null {
     if (typeof m.captions !== "boolean") return null;
     out.media.captions = m.captions;
   }
+  if (m.screenStream !== undefined) {
+    if (!isId(m.screenStream)) return null;
+    out.media.screenStream = m.screenStream;
+  }
   if (x.keyId !== undefined) {
     if (!isInt(x.keyId, 0, 0xffffffff)) return null;
     out.keyId = x.keyId;
@@ -173,6 +184,10 @@ export function decodePresence(x: unknown): Presence | null {
   if (x.want !== undefined) {
     if (!Array.isArray(x.want) || x.want.length > 256 || !x.want.every(isPeerId)) return null;
     out.want = x.want;
+  }
+  if (x.caps !== undefined) {
+    if (!Array.isArray(x.caps) || x.caps.length > 8 || !x.caps.every(isCap)) return null;
+    out.caps = x.caps;
   }
   return out;
 }

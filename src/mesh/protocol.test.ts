@@ -118,3 +118,54 @@ describe("decodeApp caption", () => {
     expect(decodeApp({ type: "caption", ts: 5, text: "hi", unavailable: "yes" })).toBeNull();
   });
 });
+
+describe("decodePresence caps", () => {
+  const withCaps = (caps: unknown) => ({ ...presence({}), caps });
+
+  test("absent stays absent", () => {
+    const p = decodePresence(presence({}));
+    expect(p).not.toBeNull();
+    expect("caps" in (p ?? {})).toBe(false);
+  });
+
+  test("a list of capability names is kept", () => {
+    expect(decodePresence(withCaps(["screen-track"]))?.caps).toEqual(["screen-track"]);
+    expect(decodePresence(withCaps([]))?.caps).toEqual([]);
+  });
+
+  test("any other type rejects the presence", () => {
+    expect(decodePresence(withCaps("screen-track"))).toBeNull();
+    expect(decodePresence(withCaps([1]))).toBeNull();
+    expect(decodePresence(withCaps(null))).toBeNull();
+    expect(decodePresence(withCaps(["Screen Track"]))).toBeNull();
+  });
+
+  test("more than 8 entries rejects the presence", () => {
+    expect(decodePresence(withCaps(Array.from({ length: 8 }, (_, i) => `c${i}`)))).not.toBeNull();
+    expect(decodePresence(withCaps(Array.from({ length: 9 }, (_, i) => `c${i}`)))).toBeNull();
+  });
+
+  test("an entry longer than 24 characters rejects the presence", () => {
+    expect(decodePresence(withCaps(["a".repeat(24)]))).not.toBeNull();
+    expect(decodePresence(withCaps(["a".repeat(25)]))).toBeNull();
+  });
+});
+
+describe("decodePresence screenStream", () => {
+  test("absent stays absent", () => {
+    expect("screenStream" in (decodePresence(presence({}))?.media ?? {})).toBe(false);
+  });
+
+  test("a stream id is kept", () => {
+    const id = "abcdef12-3456-7890";
+    expect(decodePresence(presence({ screen: true, screenStream: id }))?.media.screenStream).toBe(
+      id,
+    );
+  });
+
+  test("anything that is not an id rejects the presence", () => {
+    expect(decodePresence(presence({ screenStream: 5 }))).toBeNull();
+    expect(decodePresence(presence({ screenStream: "short" }))).toBeNull();
+    expect(decodePresence(presence({ screenStream: "{bad id here}" }))).toBeNull();
+  });
+});

@@ -13,9 +13,9 @@ import { RecordingSheet } from "../components/RecordingSheet";
 import { SettingsSheet } from "../components/SettingsSheet";
 import { ShareSheet } from "../components/ShareSheet";
 import { Sheet } from "../components/Sheet";
+import { Stage } from "../components/Spotlight";
 import { Toasts } from "../components/Toast";
 import { VerifySheet } from "../components/VerifySheet";
-import { VideoGrid } from "../components/VideoGrid";
 import { browserOnline, connectionSummary, LINK_LABEL } from "../connection";
 import type { MemberView, RecordingFiles, RoomSession } from "../session";
 
@@ -48,6 +48,8 @@ export function Room(props: {
   const [dragging, setDragging] = useState(false);
   const [recordingFiles, setRecordingFiles] = useState<RecordingFiles | null>(null);
   const [leaveAfterRecording, setLeaveAfterRecording] = useState(false);
+  // The tile in large, `${peerId}:camera` or `${peerId}:screen`: yours alone, never sent.
+  const [pinned, setPinned] = useState<string | null>(null);
 
   const members = s.members();
   const others = members.filter((m) => !m.self);
@@ -120,6 +122,17 @@ export function Room(props: {
       removeEventListener("drop", drop);
     };
   }, [s, props.mode]);
+
+  // Escape puts a pinned tile back, unless something else (a sheet, a menu) took the key.
+  useEffect(() => {
+    if (!pinned) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector("dialog[open]"))
+        setPinned(null);
+    };
+    addEventListener("keydown", key);
+    return () => removeEventListener("keydown", key);
+  }, [pinned]);
 
   // Open the invite sheet right away when you are alone in a brand-new room.
   useEffect(() => {
@@ -258,7 +271,7 @@ export function Room(props: {
         {files ? (
           <FilesPanel session={s} variant="main" onInvite={() => setShare(true)} />
         ) : inCall ? (
-          <VideoGrid session={s} members={members} />
+          <Stage session={s} members={members} pinned={pinned} onPin={setPinned} />
         ) : (
           <div class="empty-stage">
             {others.length === 0 ? (

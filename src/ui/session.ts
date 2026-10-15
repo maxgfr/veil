@@ -26,7 +26,7 @@ import {
   type Outgoing,
   pickSink,
 } from "../features/files";
-import { detectE2ee, Media, rtcConfigFor } from "../features/media";
+import { detectE2ee, Media, rtcConfigFor, SCREEN_TRACK_CAP } from "../features/media";
 import {
   type CaptionLine,
   Recorder,
@@ -38,7 +38,7 @@ import type { AppMessage, MediaState } from "../mesh/protocol";
 import { type LinkInfo, type Member, Room } from "../mesh/room";
 import type { SignalConfig } from "../signal/mux";
 import type { TransportStatus } from "../signal/types";
-import { iceServers, type Settings, saveSettings, settings } from "./settings";
+import { iceServers, type ScreenQuality, type Settings, saveSettings, settings } from "./settings";
 
 export interface JoinParams {
   key: Uint8Array;
@@ -156,6 +156,8 @@ export class RoomSession {
       keys: room.keys,
       memberMedia: (id) => room.members.get(id)?.media,
       memberE2ee: (id) => room.members.get(id)?.e2ee ?? false,
+      memberCaps: (id) => room.members.get(id)?.caps ?? [],
+      screenQuality: () => settings.value.screenQuality,
       publish: (state) => room.setMedia(this.presence(state)),
       onChange: () => {
         this.syncTranscriber();
@@ -199,6 +201,7 @@ export class RoomSession {
         signal,
         rtc: rtcConfigFor(mode, { iceServers: iceServers(s) }),
         e2ee: mode !== "none",
+        caps: [SCREEN_TRACK_CAP],
       },
       {
         members: () => session?.onMembers(),
@@ -286,6 +289,8 @@ export class RoomSession {
     // Media is attached once we know the member (its E2EE capability comes with its presence).
     for (const peer of this.room.peers.values())
       if (peer.ready && this.room.members.has(peer.remoteId)) this.media.onLinkUp(peer);
+    // Capabilities and screen stream ids come with presence: screen senders and routing follow.
+    this.media.onMembers();
     const recording = new Set<string>();
     for (const m of this.room.members.values()) if (m.media?.recording) recording.add(m.peerId);
     for (const id of recording)
@@ -508,6 +513,12 @@ export class RoomSession {
     });
   }
 
+  /** Saves the screen-share quality and applies it now if we are sharing. */
+  setScreenQuality(q: ScreenQuality): Promise<void> {
+    saveSettings({ ...settings.value, screenQuality: q });
+    return this.queueMedia(() => this.media.setScreenQuality(q));
+  }
+
   /** Saves the chosen microphone or camera and switches to it now if it is in use. */
   selectDevice(kind: "audio" | "video", deviceId: string): Promise<void> {
     saveSettings({
@@ -578,7 +589,7 @@ export class RoomSession {
     this.changed();
   }
 
-  /** Us first, then everyone whose media we receive. */
+  /** Us first, then everyone whose media we receive, then any screen share. */
   private recorderSources(): RecorderSource[] {
     const want = [
       ...this.media.preview.getVideoTracks(),
@@ -593,6 +604,22 @@ export class RoomSession {
     ];
     for (const r of this.media.remote.values())
       out.push({ id: r.peerId, nick: this.nickOf(r.peerId), stream: r.stream });
+    // Screen ids differ from camera ids: the recorder keys its videos by id.
+    if (this.media.screenOn)
+      out.push({
+        id: `${this.peerId}:screen`,
+        nick: this.nickOf(this.peerId),
+        stream: this.media.screenStream,
+        kind: "screen",
+      });
+    for (const r of this.media.remote.values())
+      if (r.screen)
+        out.push({
+          id: `${r.peerId}:screen`,
+          nick: this.nickOf(r.peerId),
+          stream: r.screen,
+          kind: "screen",
+        });
     return out;
   }
 
