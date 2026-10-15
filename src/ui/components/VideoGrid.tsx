@@ -71,13 +71,15 @@ export function RemoteAudio(props: { session: RoomSession; members: MemberView[]
   );
 }
 
-/** The camera tiles, then a tile per shared screen. */
+/**
+ * A camera tile for every member, even one with neither microphone nor camera
+ * on (shown by their initials), then a tile per shared screen.
+ */
 export function stageTiles(s: RoomSession, members: MemberView[]): StageTile[] {
   const cameras: StageTile[] = [];
   const screens: StageTile[] = [];
   for (const m of members) {
     const remote = s.media.remote.get(m.peerId);
-    if (!(m.self || m.media.audio || m.media.video || m.media.screen || remote)) continue;
     const screen = m.self ? (s.media.screenOn ? s.media.screenStream : null) : remote?.screen;
     // A peer without a separate screen track sends its screen in place of the camera.
     const legacyScreen = !m.self && m.media.screen && !screen;

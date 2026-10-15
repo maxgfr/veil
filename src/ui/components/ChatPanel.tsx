@@ -1,11 +1,11 @@
 import type { JSX } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { myLang } from "../language";
 import type { RoomSession } from "../session";
 import { settings } from "../settings";
 import { FileCard } from "./FileCard";
 import { formatTime, hueOf } from "./format";
 import { Icon } from "./Icons";
-import { myLang } from "./LiveCaptions";
 
 export function ChatPanel(props: { session: RoomSession; onClose?: () => void }): JSX.Element {
   const s = props.session;

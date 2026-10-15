@@ -1,6 +1,6 @@
 /**
  * Preferences, persisted in localStorage. Only preferences live here
- * (nickname, transports, relays, STUN/TURN, on-device AI): never a room key, a message or
+ * (nickname, transports, relays, STUN/TURN, language, built-in AI): never a room key, a message or
  * a file. Every read is defensive: storage may be unavailable or corrupted.
  */
 import { signal } from "@preact/signals";
@@ -17,15 +17,8 @@ export interface TurnServer {
 }
 
 export interface AiSettings {
-  /** The on-device model picked (a WebLLM id); null until one is downloaded or chosen. */
-  model: string | null;
   /** Translate chat messages into the user's language as they arrive. */
   translateChat: boolean;
-  /**
-   * The Whisper model (a Hugging Face repo) that transcribes when the browser can't
-   * recognize speech on the device; null for none. Set when its download starts.
-   */
-  speechModel: string | null;
 }
 
 /** How a screen share is captured: sharp text at a low frame rate, or smooth motion. */
@@ -45,6 +38,11 @@ export interface Settings {
   ai: AiSettings;
   screenQuality: ScreenQuality;
   layout: Layout;
+  /**
+   * The language captions are recognized in and translations land in, as a BCP 47 tag;
+   * "" follows the browser's.
+   */
+  language: string;
 }
 
 export function defaultSettings(): Settings {
@@ -57,9 +55,10 @@ export function defaultSettings(): Settings {
     turn: null,
     audioDevice: "",
     videoDevice: "",
-    ai: { model: null, translateChat: false, speechModel: null },
+    ai: { translateChat: false },
     screenQuality: "detail",
     layout: "auto",
+    language: "",
   };
 }
 
@@ -111,12 +110,7 @@ export function parseSettings(raw: string | null): Settings {
     audioDevice: typeof x.audioDevice === "string" ? x.audioDevice : "",
     videoDevice: typeof x.videoDevice === "string" ? x.videoDevice : "",
     ai: {
-      model: typeof ai.model === "string" && ai.model.length < 256 ? ai.model : d.ai.model,
       translateChat: typeof ai.translateChat === "boolean" ? ai.translateChat : d.ai.translateChat,
-      speechModel:
-        typeof ai.speechModel === "string" && ai.speechModel.length < 256
-          ? ai.speechModel
-          : d.ai.speechModel,
     },
     screenQuality:
       x.screenQuality === "detail" || x.screenQuality === "motion"
@@ -124,6 +118,10 @@ export function parseSettings(raw: string | null): Settings {
         : d.screenQuality,
     layout:
       x.layout === "auto" || x.layout === "grid" || x.layout === "spotlight" ? x.layout : d.layout,
+    language:
+      typeof x.language === "string" && /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(x.language)
+        ? x.language
+        : d.language,
   };
 }
 

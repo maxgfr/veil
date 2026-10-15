@@ -40,3 +40,23 @@ test("a call delivers end-to-end encrypted video both ways", async ({ browser })
   await a.ctx.close();
   await b.ctx.close();
 });
+
+test("someone who joins a call with mic and camera off still gets a tile", async ({ browser }) => {
+  const a = await member(browser);
+  const b = await member(browser);
+  const link = await createRoom(a, "Ada");
+  await a.page.getByTestId("toggle-mic").click();
+  await joinRoom(b, link, "Bob");
+  await closeSheets(b.page);
+  await waitMembers(a.page, 1);
+
+  // Bob turns nothing on: both sides still see him on the stage, by his initials.
+  const tile = a.page.getByTestId("tile-remote");
+  await expect(tile).toBeVisible({ timeout: 20_000 });
+  await expect(tile).toContainText("Bob");
+  await expect(b.page.getByTestId("tile-self")).toBeVisible();
+  await expect(b.page.getByTestId("tile-remote")).toContainText("Ada");
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
+  await b.ctx.close();
+});

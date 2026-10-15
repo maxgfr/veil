@@ -1,22 +1,21 @@
-/** Live captions over the stage: each speaker's last two lines, in our language when it can be. */
+/**
+ * Live captions over the stage: each speaker's last two lines, in our language when it can be,
+ * and what the captions are doing (listening, or who can't be captioned).
+ */
 import type { JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { baseLang, languageName, myLang, speechLang } from "../language";
 import type { LiveCaption, RoomSession } from "../session";
 
 /** A line stays this long after it arrives. */
 const SHOW_MS = 6000;
 const PER_SPEAKER = 2;
 
-/** "en-US" → "en". */
-export function baseLang(tag: string): string {
-  return tag.split("-")[0]?.toLowerCase() ?? tag;
-}
-
-export function myLang(): string {
-  return baseLang(navigator.language || "en");
-}
-
-export function LiveCaptions(props: { session: RoomSession }): JSX.Element | null {
+export function LiveCaptions(props: {
+  session: RoomSession;
+  /** Opens the Settings where the language is picked. */
+  onSettings: () => void;
+}): JSX.Element | null {
   const s = props.session;
   const on = s.captionsOn.value;
   const all = s.liveCaptions.value;
@@ -52,8 +51,33 @@ export function LiveCaptions(props: { session: RoomSession }): JSX.Element | nul
   });
 
   if (!on) return null;
+  const unavailable = s.captionsUnavailable.value;
+  const selfOut = s.media.micOn && unavailable.has(s.peerId);
+  const othersOut = [...unavailable].filter((id) => id !== s.peerId && s.room.members.has(id));
+  const spoken = languageName(speechLang());
   return (
     <div class="live-captions" aria-live="polite" data-testid="live-captions">
+      {selfOut && (
+        <p class="live-caption-status" data-testid="captions-unavailable">
+          This browser can't recognize {spoken} on this device: what you say isn't captioned.{" "}
+          <button type="button" class="live-caption-action" onClick={props.onSettings}>
+            Change language
+          </button>
+        </p>
+      )}
+      {othersOut.map((id) => (
+        <p key={id} class="live-caption-status" data-testid="captions-unavailable-member">
+          {s.nickOf(id)}'s browser can't caption their speech.
+        </p>
+      ))}
+      {shown.length === 0 && !selfOut && (
+        <p class="live-caption-status" data-testid="captions-listening">
+          Captions on, in {spoken}.{" "}
+          <button type="button" class="live-caption-action" onClick={props.onSettings}>
+            Change
+          </button>
+        </p>
+      )}
       {shown.map((c) => {
         const text = translated.current.get(c);
         return (

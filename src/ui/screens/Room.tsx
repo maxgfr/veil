@@ -313,7 +313,15 @@ export function Room(props: {
             )}
           </div>
         )}
-        {!files && <LiveCaptions session={s} />}
+        {!files && (
+          <LiveCaptions
+            session={s}
+            onSettings={() => {
+              openAiSettings();
+              setSettingsOpen(true);
+            }}
+          />
+        )}
       </main>
 
       <aside class="side" aria-hidden={!side}>
@@ -373,10 +381,6 @@ export function Room(props: {
       <RecordingSheet
         files={recordingFiles}
         lines={recordingFiles?.lines ?? []}
-        onSetupAi={() => {
-          openAiSettings();
-          setSettingsOpen(true);
-        }}
         onClose={() => {
           setRecordingFiles(null);
           setLeaveAfterRecording(false);

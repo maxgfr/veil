@@ -5,13 +5,12 @@
  * available" and only then asks it to take over, so a call is never
  * interrupted by an update.
  *
- * The AI worker (WebLLM, ~2 MB gzip) is the exception: it is not precached
- * but cached on first use in its own cache, which updates keep. So is the
- * speech worker with ONNX Runtime's files (tens of MB), in another. The
- * model weights (WebLLM's `webllm/*`, transformers.js's `transformers-cache`)
- * are never touched here.
+ * Earlier versions downloaded on-device models (WebLLM's `webllm/*`,
+ * transformers.js's `transformers-cache`): activating deletes them.
  */
-import { ENGINE_CACHES } from "./ai/caches";
+
+// A module: these interfaces stay local rather than merge with the DOM's.
+export {};
 
 interface SwScope {
   addEventListener(type: "install", fn: (e: ExtendableEvent) => void): void;
@@ -35,18 +34,11 @@ interface FetchEvent extends ExtendableEvent {
 const sw = self as unknown as SwScope;
 const CACHE = `veil-${__SW_VERSION__}`;
 const PRECACHE = __PRECACHE__;
-const abs = (url: string) => new URL(url, sw.location.href).href;
-/** Cached on first use: each cache, with the only URLs this version keeps in it. */
-const ON_FIRST_USE: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  [ENGINE_CACHES.ai, new Set([abs(__AI_WORKER_URL__)])],
-  [ENGINE_CACHES.speech, new Set([__SPEECH_WORKER_URL__, ...__ORT_URLS__].map(abs))],
-]);
-
-/** The first-use cache `url` belongs in, if any. */
-function firstUseCache(url: string): string | null {
-  for (const [name, urls] of ON_FIRST_USE) if (urls.has(url)) return name;
-  return null;
-}
+/** What an older version left behind: its build and the on-device models. */
+const stale = (key: string) =>
+  (key.startsWith("veil-") && key !== CACHE) ||
+  key.startsWith("webllm/") ||
+  key === "transformers-cache";
 
 sw.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)));
@@ -55,14 +47,7 @@ sw.addEventListener("install", (e) => {
 sw.addEventListener("activate", (e) => {
   e.waitUntil(
     (async () => {
-      for (const key of await caches.keys())
-        if (key.startsWith("veil-") && key !== CACHE && !ON_FIRST_USE.has(key))
-          await caches.delete(key);
-      // Keep only this version's engines.
-      for (const [name, urls] of ON_FIRST_USE) {
-        const cache = await caches.open(name);
-        for (const req of await cache.keys()) if (!urls.has(req.url)) await cache.delete(req);
-      }
+      for (const key of await caches.keys()) if (stale(key)) await caches.delete(key);
       await sw.clients.claim();
     })(),
   );
@@ -76,21 +61,6 @@ sw.addEventListener("fetch", (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== "GET" || url.origin !== sw.location.origin) return;
-  const key = url.origin + url.pathname;
-  const engine = firstUseCache(key);
-  if (engine) {
-    e.respondWith(
-      (async () => {
-        const cache = await caches.open(engine);
-        const hit = await cache.match(key);
-        if (hit) return hit;
-        const res = await fetch(req);
-        if (res.ok) await cache.put(key, res.clone());
-        return res;
-      })(),
-    );
-    return;
-  }
   e.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);
