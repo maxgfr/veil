@@ -69,6 +69,8 @@ describe("build output", () => {
     const sw = read("sw.js");
     expect(sw).toContain(out.version);
     for (const f of out.files.filter((f) => f !== "sw.js")) expect(sw).toContain(`./${f}`);
+    // Fetched past the HTTP cache, so a stale shell never names a script the deploy removed.
+    expect(sw).toMatch(/cache:\s*"reload"/);
   });
 
   test("no runtime code comes from a CDN", () => {

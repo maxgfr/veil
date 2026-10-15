@@ -13,6 +13,8 @@ function fake(opts: {
   status?: Availability | Promise<Availability>;
   install?: boolean;
   throws?: boolean;
+  /** install() rejects like Chrome does outside a click. */
+  needsGesture?: boolean;
 }) {
   const instances: FakeRecognition[] = [];
   const installs: unknown[] = [];
@@ -41,6 +43,10 @@ function fake(opts: {
     }
     static async install(options: unknown) {
       installs.push(options);
+      if (opts.needsGesture) {
+        opts.needsGesture = false;
+        throw new DOMException("Requires handling a user gesture", "NotAllowedError");
+      }
       return opts.install ?? true;
     }
   }
@@ -131,6 +137,43 @@ describe("transcriber", () => {
     await t.start();
     expect(instances).toHaveLength(0);
     expect(sent).toEqual(unavailable);
+  });
+
+  test("an install refused outside a click asks for one rather than reporting unavailable", async () => {
+    const { Recognition, instances, installs } = fake({
+      status: "downloadable",
+      needsGesture: true,
+    });
+    const needs: boolean[] = [];
+    const installing: boolean[] = [];
+    const sent: Caption[] = [];
+    const t = new Transcriber({
+      Recognition,
+      lang: "fr-FR",
+      send: (c) => sent.push(c),
+      onNeedsDownload: (v) => needs.push(v),
+      onInstalling: (v) => installing.push(v),
+      now: () => 42,
+    });
+    await t.start();
+    expect(instances).toHaveLength(0);
+    expect(sent).toEqual([]);
+    expect(needs).toEqual([true]);
+
+    // The click: install is asked at once, then a new start listens.
+    const done = t.download();
+    expect(installs).toHaveLength(2);
+    expect(await done).toBe(true);
+    expect(needs).toEqual([true, false]);
+    expect(installing).toEqual([true, false, true, false]);
+    await t.start();
+    expect(instances).toHaveLength(1);
+  });
+
+  test("download without an install API, or a failed one, is false", async () => {
+    expect(await setup(undefined).t.download()).toBe(false);
+    const { Recognition } = fake({ status: "downloadable", install: false });
+    expect(await setup(Recognition).t.download()).toBe(false);
   });
 
   test("unavailable is reported once and never listens", async () => {

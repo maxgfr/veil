@@ -50,11 +50,28 @@ export function LiveCaptions(props: {
     return () => clearTimeout(t);
   });
 
-  if (!on) return null;
+  // A recording captions us too: the download prompt shows even with captions off.
+  const needDownload = s.media.micOn && s.captionsNeedDownload.value;
+  if (!on && !needDownload) return null;
+  const spoken = languageName(speechLang());
+  const download = needDownload && (
+    <p class="live-caption-status" data-testid="captions-download">
+      {spoken} speech recognition has to be downloaded once to this device.{" "}
+      <button type="button" class="live-caption-action" onClick={() => s.downloadCaptions()}>
+        Download
+      </button>
+    </p>
+  );
+  if (!on) {
+    return (
+      <div class="live-captions" aria-live="polite" data-testid="live-captions">
+        {download}
+      </div>
+    );
+  }
   const unavailable = s.captionsUnavailable.value;
   const selfOut = s.media.micOn && unavailable.has(s.peerId);
   const othersOut = [...unavailable].filter((id) => id !== s.peerId && s.room.members.has(id));
-  const spoken = languageName(speechLang());
   const installing = s.media.micOn && s.captionsInstalling.value && !selfOut;
   return (
     <div class="live-captions" aria-live="polite" data-testid="live-captions">
@@ -77,7 +94,8 @@ export function LiveCaptions(props: {
           it is.
         </p>
       )}
-      {shown.length === 0 && !selfOut && !installing && (
+      {download}
+      {shown.length === 0 && !selfOut && !installing && !needDownload && (
         <p class="live-caption-status" data-testid="captions-listening">
           Captions on, in {spoken}.{" "}
           <button type="button" class="live-caption-action" onClick={props.onSettings}>

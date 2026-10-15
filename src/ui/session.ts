@@ -100,6 +100,8 @@ export class RoomSession {
   readonly liveCaptions = signal<LiveCaption[]>([]);
   /** The browser is downloading the recognition for our language: captions wait for it. */
   readonly captionsInstalling = signal(false);
+  /** The browser downloads our language's recognition only from a click: captions wait for one. */
+  readonly captionsNeedDownload = signal(false);
   /** Who (by peer id, us included) said their device can't caption them, until it does. */
   readonly captionsUnavailable = signal<ReadonlySet<string>>(new Set());
   chatOpen = false;
@@ -183,6 +185,9 @@ export class RoomSession {
       onInstalling: (installing) => {
         this.captionsInstalling.value = installing;
       },
+      onNeedsDownload: (needed) => {
+        this.captionsNeedDownload.value = needed;
+      },
     });
     let language = settings.value.language;
     this.stopLanguageWatch = effect(() => {
@@ -191,6 +196,7 @@ export class RoomSession {
       // A fresh start in the new language: it says again if it can't caption.
       this.setCaptionUnavailable(this.peerId, false);
       this.transcriber.reset();
+      this.captionsNeedDownload.value = false;
       this.transcribedTrack = null;
       this.syncTranscriber();
     });
@@ -592,6 +598,14 @@ export class RoomSession {
     this.publishRecording();
   }
 
+  /** From a click: downloads our language's recognition, then captions start. */
+  downloadCaptions(): void {
+    void this.transcriber.download().then((ok) => {
+      if (ok) this.syncTranscriber();
+      else this.onOwnCaption({ ts: Date.now(), text: "", unavailable: true });
+    });
+  }
+
   private presence(state: MediaState): MediaState {
     return { ...state, recording: this.isRecording, captions: this.captionsOn.value };
   }
@@ -654,6 +668,7 @@ export class RoomSession {
       void this.transcriber.start();
     } else {
       this.transcriber.stop();
+      this.captionsNeedDownload.value = false;
       this.transcribedTrack = null;
     }
   }

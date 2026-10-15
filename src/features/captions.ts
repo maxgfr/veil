@@ -60,6 +60,8 @@ export class Transcriber {
       send(caption: Caption): void;
       /** True while the browser downloads the language's recognition, then false. */
       onInstalling?: (installing: boolean) => void;
+      /** True when the download waits for a click (`download()`), false once it ran. */
+      onNeedsDownload?: (needed: boolean) => void;
       now?: () => number;
     },
   ) {}
@@ -70,6 +72,11 @@ export class Transcriber {
     const generation = ++this.generation;
     const ready = await this.prepare();
     if (generation !== this.generation) return;
+    if (ready === "needs-gesture") {
+      this.active = false;
+      this.deps.onNeedsDownload?.(true);
+      return;
+    }
     if (!ready) {
       this.active = false;
       this.reportUnavailable();
@@ -95,8 +102,26 @@ export class Transcriber {
     this.reportedUnavailable = false;
   }
 
+  /**
+   * Downloads the language's recognition. Call it from a click: the browser installs a model
+   * only while handling a user gesture, so nothing is awaited before asking it.
+   */
+  download(): Promise<boolean> {
+    const { Recognition, lang } = this.deps;
+    if (!Recognition?.install) return Promise.resolve(false);
+    let pending: Promise<boolean>;
+    try {
+      pending = Recognition.install({ langs: [lang], processLocally: true });
+    } catch {
+      return Promise.resolve(false);
+    }
+    this.deps.onNeedsDownload?.(false);
+    this.deps.onInstalling?.(true);
+    return pending.catch(() => false).finally(() => this.deps.onInstalling?.(false));
+  }
+
   /** Whether on-device recognition for the language is (or was made) ready. */
-  private async prepare(): Promise<boolean> {
+  private async prepare(): Promise<boolean | "needs-gesture"> {
     const { Recognition, lang } = this.deps;
     if (!Recognition?.available) return false;
     const options = { langs: [lang], processLocally: true };
@@ -107,6 +132,10 @@ export class Transcriber {
       this.deps.onInstalling?.(true);
       try {
         return await Recognition.install(options);
+      } catch (err) {
+        // Not a missing model: the download waits for a click.
+        if ((err as { name?: string } | null)?.name === "NotAllowedError") return "needs-gesture";
+        throw err;
       } finally {
         this.deps.onInstalling?.(false);
       }

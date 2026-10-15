@@ -41,7 +41,9 @@ const stale = (key: string) =>
   key === "transformers-cache";
 
 sw.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)));
+  // Past the HTTP cache: a shell cached minutes earlier names scripts the new deploy removed.
+  const fresh = PRECACHE.map((url) => new Request(url, { cache: "reload" }));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(fresh)));
 });
 
 sw.addEventListener("activate", (e) => {
