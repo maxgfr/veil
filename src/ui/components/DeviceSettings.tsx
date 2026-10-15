@@ -71,6 +71,8 @@ export function DeviceSelect(props: {
   kind: MediaKind;
   devices: DeviceInfo[];
   value: string;
+  /** Name of the device "System default" opens, when known. */
+  defaultName?: string;
   onChange: (id: string) => void;
 }): JSX.Element {
   const label = props.kind === "audio" ? "Microphone" : "Camera";
@@ -86,7 +88,9 @@ export function DeviceSelect(props: {
         data-testid={props.kind === "audio" ? "select-mic" : "select-cam"}
         onChange={(e) => props.onChange(e.currentTarget.value)}
       >
-        <option value="">System default</option>
+        <option value="">
+          {props.defaultName ? `System default (${props.defaultName})` : "System default"}
+        </option>
         {unlisted && (
           <option value={props.value}>
             {props.kind === "audio" ? "Microphone chosen earlier" : "Camera chosen earlier"}
@@ -111,6 +115,7 @@ export function DeviceSettings(props: {
   open: boolean;
 }): JSX.Element {
   const [mics, setMics] = useState<DeviceInfo[]>([]);
+  const [defaultMic, setDefaultMic] = useState("");
   const [cams, setCams] = useState<DeviceInfo[]>([]);
   const [labeled, setLabeled] = useState(true);
   const [micTest, setMicTest] = useState<MediaStream | null>(null);
@@ -128,6 +133,7 @@ export function DeviceSettings(props: {
     try {
       const d = await listDevices();
       setMics(d.mics);
+      setDefaultMic(d.defaultMic);
       setCams(d.cams);
       setLabeled(d.labeled);
     } catch {
@@ -222,6 +228,7 @@ export function DeviceSettings(props: {
       <DeviceSelect
         kind="audio"
         devices={mics}
+        defaultName={defaultMic}
         value={settings.value.audioDevice}
         onChange={(id) => void choose("audio", id)}
       />

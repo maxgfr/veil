@@ -35,7 +35,9 @@ test("settings list the microphones and test the selected one", async ({ browser
   );
   expect(peak).toBeGreaterThan(2);
   const options = await a.page.getByTestId("select-mic").locator("option").allTextContents();
-  expect(options).toEqual(["System default", "Fake Audio Input 1", "Fake Audio Input 2"]);
+  // "System default" names the microphone it opens, when the browser tells (Chromium's alias).
+  expect(options[0]).toMatch(/^System default( \(.+\))?$/);
+  expect(options.slice(1)).toEqual(["Fake Audio Input 1", "Fake Audio Input 2"]);
   await a.page.getByTestId("select-mic").selectOption({ label: "Fake Audio Input 2" });
   await expect(a.page.getByTestId("mic-level")).toBeVisible();
   const saved = await a.page.evaluate(
@@ -88,7 +90,7 @@ test("turning the microphone on in a room uses the selected device, and switchin
 
   // "System default" follows the system's default microphone (Chromium's "default" alias),
   // not the device picked last on this site.
-  await a.page.getByTestId("select-mic").selectOption({ label: "System default" });
+  await a.page.getByTestId("select-mic").selectOption("");
   if (browserName === "chromium")
     await expect(a.page.getByTestId("room")).toHaveAttribute("data-mic-device", "default");
   await a.ctx.close();
@@ -110,7 +112,7 @@ test("a saved microphone that isn't listed can be switched back to the system de
   await expect(select).toHaveValue("gone-mic");
   await expect(select.locator("option:checked")).toHaveText("Microphone chosen earlier");
 
-  await select.selectOption({ label: "System default" });
+  await select.selectOption("");
   const saved = await a.page.evaluate(
     () => JSON.parse(localStorage.getItem("veil.settings.v1") ?? "{}").audioDevice,
   );

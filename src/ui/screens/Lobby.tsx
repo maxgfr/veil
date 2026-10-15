@@ -28,6 +28,7 @@ export function Lobby(props: {
   const [video, setVideo] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [mics, setMics] = useState<DeviceInfo[]>([]);
+  const [defaultMic, setDefaultMic] = useState("");
   const [cams, setCams] = useState<DeviceInfo[]>([]);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const videoEl = useRef<HTMLVideoElement>(null);
@@ -57,6 +58,7 @@ export function Lobby(props: {
         );
         const d = await listDevices();
         setMics(d.mics);
+        setDefaultMic(d.defaultMic);
         setCams(d.cams);
       })
       .catch(() => {
@@ -168,6 +170,7 @@ export function Lobby(props: {
                 <DeviceSelect
                   kind="audio"
                   devices={mics}
+                  defaultName={defaultMic}
                   value={settings.value.audioDevice}
                   onChange={(id) => saveSettings({ ...settings.value, audioDevice: id })}
                 />

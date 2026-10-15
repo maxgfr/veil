@@ -28,13 +28,17 @@ export const VIDEO_SHAPE = {
   frameRate: { ideal: 30 },
 };
 
-export function constraintsFor(kind: MediaKind, deviceId: string): MediaTrackConstraints {
+export function constraintsFor(
+  kind: MediaKind,
+  deviceId: string,
+  alias = true,
+): MediaTrackConstraints {
   const base = kind === "audio" ? AUDIO_PROCESSING : VIDEO_SHAPE;
   if (deviceId) return { ...base, deviceId: { exact: deviceId } };
   // Chromium's "default" alias follows the system's default microphone. Without it, Chrome opens
-  // the device it ranks first for the site (the one picked last), not the system's. Ideal only:
-  // browsers without the alias open their default anyway.
-  return kind === "audio" ? { ...base, deviceId: "default" } : { ...base };
+  // the device it ranks first for the site (the one picked last), not the system's. Exact: Chrome
+  // ignores it as an ideal. Browsers without the alias are asked again without it (alias = false).
+  return kind === "audio" && alias ? { ...base, deviceId: { exact: "default" } } : { ...base };
 }
 
 type GetUserMedia = (c: MediaStreamConstraints) => Promise<MediaStream>;
@@ -56,12 +60,21 @@ export async function openDevices(
   want: DeviceRequest,
   gum: GetUserMedia = defaultGum,
 ): Promise<{ stream: MediaStream; fellBack: MediaKind[] }> {
-  const build = (r: DeviceRequest): MediaStreamConstraints => ({
-    audio: r.audio === undefined ? false : constraintsFor("audio", r.audio),
-    video: r.video === undefined ? false : constraintsFor("video", r.video),
+  const build = (r: DeviceRequest, alias: boolean): MediaStreamConstraints => ({
+    audio: r.audio === undefined ? false : constraintsFor("audio", r.audio, alias),
+    video: r.video === undefined ? false : constraintsFor("video", r.video, alias),
   });
+  // The default microphone by its alias first; a browser without the alias opens its own default.
+  const tryOpen = async (r: DeviceRequest): Promise<MediaStream> => {
+    try {
+      return await gum(build(r, true));
+    } catch (err) {
+      if (r.audio !== "" || !deviceGone(err)) throw err;
+      return gum(build(r, false));
+    }
+  };
   try {
-    return { stream: await gum(build(want)), fellBack: [] };
+    return { stream: await tryOpen(want), fellBack: [] };
   } catch (err) {
     const specific: MediaKind[] = [];
     if (want.audio) specific.push("audio");
@@ -70,7 +83,7 @@ export async function openDevices(
     const defaults: DeviceRequest = {};
     if (want.audio !== undefined) defaults.audio = "";
     if (want.video !== undefined) defaults.video = "";
-    return { stream: await gum(build(defaults)), fellBack: specific };
+    return { stream: await tryOpen(defaults), fellBack: specific };
   }
 }
 
@@ -78,6 +91,8 @@ export async function openDevices(
 export async function listDevices(): Promise<{
   mics: DeviceInfo[];
   cams: DeviceInfo[];
+  /** Name of the system's default microphone, "" when the browser doesn't tell. */
+  defaultMic: string;
   labeled: boolean;
 }> {
   const all = await navigator.mediaDevices.enumerateDevices();
@@ -89,9 +104,14 @@ export async function listDevices(): Promise<{
     real
       .filter((d) => d.kind === kind)
       .map((d, i) => ({ id: d.deviceId, label: d.label || `${fallback} ${i + 1}` }));
+  // The microphone behind the "default" alias: the real one of the same group, named without the
+  // browser's localized "Default - " prefix.
+  const alias = all.find((d) => d.kind === "audioinput" && d.deviceId === "default");
+  const behind = alias && real.find((d) => d.kind === "audioinput" && d.groupId === alias.groupId);
   return {
     mics: pick("audioinput", "Microphone"),
     cams: pick("videoinput", "Camera"),
+    defaultMic: behind?.label || alias?.label || "",
     labeled: real.some((d) => d.label),
   };
 }
