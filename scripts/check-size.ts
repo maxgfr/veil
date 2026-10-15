@@ -5,7 +5,7 @@
  * but not counted.
  */
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 
 export const BUDGET_GZIP = 60 * 1024;
@@ -40,7 +40,12 @@ if (import.meta.main) {
   let total = 0;
   for (const f of initial) total += gz(f);
   const assets = join(DIST, "assets");
-  for (const f of readdirSync(assets).sort()) {
+  // Recursive: the opt-in noise reduction's files sit in a folder of their own.
+  const files = readdirSync(assets, { withFileTypes: true, recursive: true })
+    .filter((e) => e.isFile())
+    .map((e) => relative(assets, join(e.parentPath, e.name)))
+    .sort();
+  for (const f of files) {
     const p = join(assets, f);
     const tag = initial.includes(p) ? "initial" : f.endsWith(".js") ? "lazy" : "asset";
     console.log(`${tag.padEnd(8)} ${(gz(p) / 1024).toFixed(1).padStart(6)} KB gz  ${f}`);

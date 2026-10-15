@@ -70,9 +70,13 @@ export function SettingsSheet(props: {
   const save = () => {
     saveSettings({
       ...draft,
-      // Devices are saved as soon as they are picked: never overwrite them with the draft.
+      // Saved as soon as they are picked: never overwrite them with the draft.
       audioDevice: settings.value.audioDevice,
       videoDevice: settings.value.videoDevice,
+      noiseReduction: settings.value.noiseReduction,
+      screenQuality: settings.value.screenQuality,
+      layout: settings.value.layout,
+      language: settings.value.language,
       ai: settings.value.ai,
       nostr: { ...draft.nostr, relays: parseUrlList(relays, ["wss://", "ws://"]) },
       torrent: { ...draft.torrent, trackers: parseUrlList(trackers, ["wss://", "ws://"]) },

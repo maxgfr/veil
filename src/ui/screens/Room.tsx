@@ -149,6 +149,7 @@ export function Room(props: {
       data-members={String(others.length)}
       data-links={String(s.room.readyIds().length)}
       data-mic-device={s.media.activeDeviceId("audio")}
+      data-noise-reduction={String(s.media.denoising)}
       data-cam-device={s.media.activeDeviceId("video")}
     >
       <header class="room-head">

@@ -8,6 +8,7 @@ import { type DeviceInfo, listDevices, type MediaKind, openDevices } from "../..
 import type { RoomSession } from "../session";
 import { type ScreenQuality, saveSettings, settings } from "../settings";
 import { Icon } from "./Icons";
+import { Toggle } from "./SettingsSheet";
 
 const SCREEN_QUALITIES: { value: ScreenQuality; label: string }[] = [
   { value: "detail", label: "Text & detail" },
@@ -202,6 +203,11 @@ export function DeviceSettings(props: {
     }
   };
 
+  const chooseNoiseReduction = async (on: boolean) => {
+    if (props.session) await props.session.setNoiseReduction(on);
+    else saveSettings({ ...settings.value, noiseReduction: on });
+  };
+
   const chooseQuality = async (screenQuality: ScreenQuality) => {
     if (props.session) await props.session.setScreenQuality(screenQuality);
     else saveSettings({ ...settings.value, screenQuality });
@@ -238,6 +244,13 @@ export function DeviceSettings(props: {
           </div>
         )}
       </div>
+      <Toggle
+        label="Strong noise reduction"
+        hint="Removes keyboards, fans and voices around you, on this device. Downloads about 0.4 MB the first time."
+        checked={settings.value.noiseReduction}
+        testid="toggle-noise-reduction"
+        onChange={(on) => void chooseNoiseReduction(on)}
+      />
       <DeviceSelect
         kind="video"
         devices={cams}

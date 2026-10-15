@@ -131,6 +131,10 @@ export class RoomSession {
         audio: settings.value.audioDevice,
         video: settings.value.videoDevice,
       }),
+      noiseReduction: () => settings.value.noiseReduction,
+      noiseAssets: __NOISE_ASSETS__,
+      onNoiseReductionFailed: () =>
+        this.toast("Strong noise reduction couldn't start: using the standard one.", "warn"),
       onDeviceFallback: (kind) =>
         this.toast(
           `The selected ${kind === "audio" ? "microphone" : "camera"} is unavailable: using the system default.`,
@@ -461,6 +465,12 @@ export class RoomSession {
   setScreenQuality(q: ScreenQuality): Promise<void> {
     saveSettings({ ...settings.value, screenQuality: q });
     return this.queueMedia(() => this.media.setScreenQuality(q));
+  }
+
+  /** Saves strong noise reduction on or off and reopens the microphone with it, if in use. */
+  setNoiseReduction(on: boolean): Promise<void> {
+    saveSettings({ ...settings.value, noiseReduction: on });
+    return this.queueMedia(() => this.media.switchDevice("audio"));
   }
 
   /** Saves the chosen microphone or camera and switches to it now if it is in use. */

@@ -21,6 +21,7 @@ import { trustedScriptUrl } from "../security";
 import type { ScreenQuality } from "../ui/settings";
 import type { WorkerMessage } from "../workers/e2ee-worker";
 import { type DeviceRequest, type MediaKind, openDevices } from "./devices";
+import { canDenoise, type Denoised, denoise, type NoiseAssets } from "./noise";
 
 export type E2eeMode = "script" | "streams" | "none";
 
@@ -193,6 +194,19 @@ export interface MediaDeps {
   memberCaps(peerId: string): readonly string[];
   /** The screen-share quality chosen in Settings, read when Media is created. */
   screenQuality(): ScreenQuality;
+  /** Strong noise reduction is on in Settings, read each time the microphone opens. */
+  noiseReduction?(): boolean;
+  /** Where RNNoise's files are (injected at build time). */
+  noiseAssets?: NoiseAssets;
+  /** Strong noise reduction couldn't start: the microphone is sent as the browser gives it. */
+  onNoiseReductionFailed?(): void;
+}
+
+/** Our microphone: what is sent, the device's own track, and the denoiser between them. */
+interface Mic {
+  track: MediaStreamTrack;
+  raw: MediaStreamTrack;
+  denoiser: Denoised | null;
 }
 
 export interface StartOptions {
@@ -233,6 +247,7 @@ export class Media {
   private audioCtx: AudioContext | null = null;
   private localAnalyser: AnalyserNode | null = null;
   private localSource: MediaStreamAudioSourceNode | null = null;
+  private mic: Mic | null = null;
 
   constructor(private readonly d: MediaDeps) {
     this.mode = d.mode ?? detectE2ee();
@@ -342,13 +357,40 @@ export class Media {
     return stream;
   }
 
+  /** The microphone of an opened stream, through RNNoise when strong noise reduction is on. */
+  private async micFrom(stream: MediaStream): Promise<Mic | null> {
+    const raw = stream.getAudioTracks()[0];
+    if (!raw) return null;
+    const assets = this.d.noiseAssets;
+    if (!this.d.noiseReduction?.() || !assets || !canDenoise())
+      return { track: raw, raw, denoiser: null };
+    try {
+      const denoiser = await denoise(raw, assets);
+      return { track: denoiser.track, raw, denoiser };
+    } catch (err) {
+      console.warn("noise reduction failed", err);
+      this.d.onNoiseReductionFailed?.();
+      return { track: raw, raw, denoiser: null };
+    }
+  }
+
+  private useMic(mic: Mic | null): void {
+    this.mic = mic;
+    this.audioTrack = mic?.track ?? null;
+  }
+
+  private static release(mic: Mic | null): void {
+    if (mic?.denoiser) mic.denoiser.stop();
+    else mic?.raw.stop();
+  }
+
   async start(o: StartOptions): Promise<void> {
     const pref = this.d.preferredDevices();
     const want: DeviceRequest = {};
     if (o.audio) want.audio = pref.audio;
     if (o.video) want.video = pref.video;
     const stream = o.audio || o.video ? await this.open(want) : new MediaStream();
-    this.audioTrack = stream.getAudioTracks()[0] ?? null;
+    this.useMic(await this.micFrom(stream));
     this.cameraTrack = stream.getVideoTracks()[0] ?? null;
     this.micOn = !!this.audioTrack;
     this.camOn = !!this.cameraTrack;
@@ -364,8 +406,10 @@ export class Media {
   stop(): void {
     if (!this.active) return;
     this.active = false;
-    for (const t of [this.audioTrack, this.cameraTrack, this.screenTrack]) t?.stop();
-    this.audioTrack = this.cameraTrack = this.screenTrack = null;
+    Media.release(this.mic);
+    this.useMic(null);
+    for (const t of [this.cameraTrack, this.screenTrack]) t?.stop();
+    this.cameraTrack = this.screenTrack = null;
     this.micOn = this.camOn = this.screenOn = false;
     for (const s of this.senders.values()) {
       void s.audio.replaceTrack(null).catch(() => {});
@@ -387,7 +431,7 @@ export class Media {
   async setMic(on: boolean): Promise<void> {
     if (on && !this.audioTrack) {
       const s = await this.open({ audio: this.d.preferredDevices().audio });
-      this.audioTrack = s.getAudioTracks()[0] ?? null;
+      this.useMic(await this.micFrom(s));
       if (this.audioTrack) this.watchLocalLevel(this.audioTrack);
     }
     if (this.audioTrack) this.audioTrack.enabled = on;
@@ -424,10 +468,11 @@ export class Media {
     const pref = this.d.preferredDevices();
     if (kind === "audio") {
       if (!this.audioTrack) return;
-      const track = (await this.open({ audio: pref.audio })).getAudioTracks()[0];
-      if (!track) return;
-      this.audioTrack.stop();
-      this.audioTrack = track;
+      const mic = await this.micFrom(await this.open({ audio: pref.audio }));
+      if (!mic) return;
+      Media.release(this.mic);
+      this.useMic(mic);
+      const track = mic.track;
       track.enabled = this.micOn;
       this.watchLocalLevel(track);
       for (const sd of this.senders.values())
@@ -445,8 +490,14 @@ export class Media {
   }
 
   /** The device actually capturing, as the browser reports it (for display and tests). */
+  /** Our microphone goes through RNNoise (for display and tests). */
+  get denoising(): boolean {
+    return !!this.mic?.denoiser;
+  }
+
   activeDeviceId(kind: MediaKind): string {
-    const track = kind === "audio" ? this.audioTrack : this.cameraTrack;
+    // The device's own track: a denoised one comes from an AudioContext, not a device.
+    const track = kind === "audio" ? (this.mic?.raw ?? null) : this.cameraTrack;
     return track?.getSettings().deviceId ?? "";
   }
 
