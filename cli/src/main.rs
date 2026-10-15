@@ -224,9 +224,17 @@ impl Names {
                 eprintln!("- {nick} left");
                 false
             }
-            RoomEvent::LinkUp { peer_id, sas } => {
-                eprintln!("  direct encrypted link with {} · verify together: {sas}", self.of(peer_id));
+            RoomEvent::LinkUp { peer_id } => {
+                eprintln!("  direct encrypted link with {}", self.of(peer_id));
                 false
+            }
+            RoomEvent::Sas { peer_id, sas: Some(sas) } => {
+                eprintln!("  verify together with {}: {sas}", self.of(peer_id));
+                true
+            }
+            RoomEvent::Sas { peer_id, sas: None } => {
+                eprintln!("  {} uses an older version of Veil: emoji verification unavailable", self.of(peer_id));
+                true
             }
             _ => false,
         }

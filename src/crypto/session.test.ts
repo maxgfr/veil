@@ -99,6 +99,31 @@ describe("session", () => {
     await expect(ha.finish({ ...hb.hello, sig })).rejects.toBeInstanceOf(HandshakeError);
   });
 
+  test("a tampered SAS commitment is rejected", async () => {
+    const { ha, hb } = await pair();
+    const commit = hb.hello.commit.slice();
+    commit[0] = (commit[0] as number) ^ 1;
+    await expect(ha.finish({ ...hb.hello, commit })).rejects.toBeInstanceOf(HandshakeError);
+    const { csig: _s, ...unsigned } = hb.hello;
+    await expect(ha.finish(unsigned)).rejects.toBeInstanceOf(HandshakeError);
+  });
+
+  test("the revealed SAS nonce must open the commitment", async () => {
+    const { ha, hb } = await pair();
+    const [sa, sb] = await Promise.all([ha.finish(hb.hello), hb.finish(ha.hello)]);
+    expect(await sa.reveal(randomBytes(32))).toBe(false);
+    expect(await sa.reveal(sb.sas.nonce)).toBe(true);
+    expect(await sa.remoteSasNonce).toEqual(sb.sas.nonce);
+  });
+
+  test("a peer without a SAS commitment can still connect, but cannot reveal", async () => {
+    const { ha, hb } = await pair();
+    const { commit: _c, csig: _s, ...old } = hb.hello;
+    const sa = await ha.finish(old);
+    expect(sa.sas.remoteCommit).toBeNull();
+    expect(await sa.reveal(randomBytes(32))).toBe(false);
+  });
+
   test("mismatched DTLS fingerprints (MITM) are rejected", async () => {
     const { ha, hb } = await pair({ fpSeenByB: "sha-256 EE:EE:EE" });
     await expect(ha.finish(hb.hello)).rejects.toBeInstanceOf(HandshakeError);

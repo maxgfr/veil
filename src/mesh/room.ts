@@ -47,6 +47,8 @@ export const PRESENCE_MS = 10_000;
 export const MEMBER_TIMEOUT_MS = 35_000;
 const MAINTAIN_MS = 3000;
 const PENDING_KEY_MS = 15_000;
+/** How long `sas()` waits for the peer's nonce, which follows the handshake right away. */
+const SAS_WAIT_MS = 5000;
 
 export interface Member {
   peerId: string;
@@ -294,13 +296,33 @@ export class Room {
     this.emitMembers();
   }
 
-  async sas(peerId: string): Promise<Sas | null> {
-    const p = this.peers.get(peerId);
-    if (!p?.secure) return null;
+  /**
+   * The emojis to compare with a directly linked member. Null without a link
+   * (or while its nonce is on the way); "outdated" for a member whose version
+   * predates the SAS commitment, since its emojis would prove nothing.
+   */
+  async sas(peerId: string): Promise<Sas | "outdated" | null> {
+    const s = this.peers.get(peerId)?.secure;
+    if (!s) return null;
+    if (!s.sas.remoteCommit) return "outdated";
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const nonce = await Promise.race([
+      s.remoteSasNonce,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), SAS_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (!nonce) return null;
     return computeSas(
       this.secrets.sasSalt,
-      { peerId: this.peerId, edPub: this.identity.edPub, fingerprint: p.localFp },
-      { peerId, edPub: p.secure.remoteEdPub, fingerprint: p.remoteFp },
+      {
+        peerId: this.peerId,
+        edPub: this.identity.edPub,
+        fingerprint: s.localFp,
+        nonce: s.sas.nonce,
+      },
+      { peerId, edPub: s.remoteEdPub, fingerprint: s.remoteFp, nonce },
     );
   }
 

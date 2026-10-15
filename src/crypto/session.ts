@@ -7,14 +7,26 @@
  * X25519 key signed with its identity, together with both DTLS fingerprints.
  * The ECDH secret is expanded with HKDF salted by the room's bindKey and bound
  * to both fingerprints, so the session only exists between the two endpoints
- * of that exact DTLS association, inside that exact room.
+ * of that exact DTLS association, inside that exact room. The hello also
+ * commits to a SAS nonce, revealed once the session is up (see crypto/sas.ts).
  *
  * SecureChannel then encrypts every DataChannel message with AES-GCM using a
  * strictly increasing 64-bit counter as nonce: replays and reordering are
  * rejected.
  */
 import { AeadError } from "./aead";
-import { type Bytes, bytes, concat, readU64, sha256, toHex, u64, utf8 } from "./bytes";
+import {
+  type Bytes,
+  bytes,
+  concat,
+  equalBytes,
+  randomBytes,
+  readU64,
+  sha256,
+  toHex,
+  u64,
+  utf8,
+} from "./bytes";
 import { hkdf } from "./room";
 
 export interface Identity {
@@ -83,6 +95,15 @@ export interface HandshakeHello {
   edPub: Bytes;
   xPub: Bytes;
   sig: Bytes;
+  /** SHA-256 commitment to the sender's SAS nonce (absent from peers that predate it). */
+  commit?: Bytes;
+  /** Signature over the transcript and the commitment. */
+  csig?: Bytes;
+}
+
+/** Commitment to a SAS nonce, sent in the hello before either side reveals its nonce. */
+export function sasCommit(nonce: Uint8Array): Promise<Bytes> {
+  return sha256(concat(utf8("veil/sas-commit/v1"), nonce));
 }
 
 export interface HandshakeParams {
@@ -114,11 +135,20 @@ async function transcript(
   );
 }
 
+/**
+ * The commitment gets its own signature so that `sig` stays verifiable by
+ * peers that predate it (they ignore the extra fields).
+ */
+function commitTranscript(t: Uint8Array, commit: Uint8Array): Bytes {
+  return concat(utf8("veil/hs-commit/v1"), t, commit);
+}
+
 export class Handshake {
   private constructor(
     private readonly p: HandshakeParams,
     private readonly xPriv: CryptoKey,
-    readonly hello: HandshakeHello,
+    private readonly sasNonce: Bytes,
+    readonly hello: Required<HandshakeHello>,
   ) {}
 
   static async start(p: HandshakeParams): Promise<Handshake> {
@@ -126,8 +156,20 @@ export class Handshake {
       "deriveBits",
     ])) as CryptoKeyPair;
     const xPub = new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey));
-    const sig = await p.identity.sign(await transcript(p.bindKey, xPub, p.localFp, p.remoteFp));
-    return new Handshake(p, kp.privateKey, { edPub: p.identity.edPub, xPub, sig });
+    const t = await transcript(p.bindKey, xPub, p.localFp, p.remoteFp);
+    const sasNonce = randomBytes(32);
+    const commit = await sasCommit(sasNonce);
+    const [sig, csig] = await Promise.all([
+      p.identity.sign(t),
+      p.identity.sign(commitTranscript(t, commit)),
+    ]);
+    return new Handshake(p, kp.privateKey, sasNonce, {
+      edPub: p.identity.edPub,
+      xPub,
+      sig,
+      commit,
+      csig,
+    });
   }
 
   async finish(remote: HandshakeHello): Promise<PeerSession> {
@@ -135,12 +177,16 @@ export class Handshake {
     if (remote.xPub.length !== 32) throw new HandshakeError("bad key");
     if ((await peerIdOf(remote.edPub)) !== remotePeerId)
       throw new HandshakeError("identity mismatch");
-    const ok = await verifyEd25519(
-      remote.edPub,
-      remote.sig,
-      await transcript(bindKey, remote.xPub, remoteFp, localFp),
-    );
-    if (!ok) throw new HandshakeError("bad signature");
+    const t = await transcript(bindKey, remote.xPub, remoteFp, localFp);
+    if (!(await verifyEd25519(remote.edPub, remote.sig, t)))
+      throw new HandshakeError("bad signature");
+    let remoteCommit: Bytes | null = null;
+    if (remote.commit || remote.csig) {
+      if (remote.commit?.length !== 32 || !remote.csig) throw new HandshakeError("bad commit");
+      if (!(await verifyEd25519(remote.edPub, remote.csig, commitTranscript(t, remote.commit))))
+        throw new HandshakeError("bad signature");
+      remoteCommit = remote.commit;
+    }
 
     const theirX = await crypto.subtle.importKey(
       "raw",
@@ -172,11 +218,20 @@ export class Handshake {
         utf8(`${normalizeFingerprint(loFp)}|${normalizeFingerprint(hiFp)}`),
       ),
     );
-    return new PeerSession(secret, identity, remotePeerId, remote.edPub, localFp, remoteFp);
+    return new PeerSession(secret, identity, remotePeerId, remote.edPub, localFp, remoteFp, {
+      nonce: this.sasNonce,
+      remoteCommit,
+    });
   }
 }
 
 export class PeerSession {
+  private resolveNonce!: (nonce: Bytes) => void;
+  /** The peer's SAS nonce, once revealed and checked against its commitment. */
+  readonly remoteSasNonce = new Promise<Bytes>((resolve) => {
+    this.resolveNonce = resolve;
+  });
+
   constructor(
     private readonly secret: Bytes,
     readonly identity: Identity,
@@ -184,7 +239,21 @@ export class PeerSession {
     readonly remoteEdPub: Bytes,
     readonly localFp: string,
     readonly remoteFp: string,
+    /**
+     * Our SAS nonce, revealed once the session is up (so after the peer
+     * committed to theirs), and the peer's commitment: null for a peer that
+     * predates the commitment, whose emojis would prove nothing.
+     */
+    readonly sas: { nonce: Bytes; remoteCommit: Bytes | null },
   ) {}
+
+  /** Checks a revealed nonce against the peer's commitment; false means it does not match. */
+  async reveal(nonce: Uint8Array): Promise<boolean> {
+    const commit = this.sas.remoteCommit;
+    if (!commit || nonce.length !== 32 || !equalBytes(await sasCommit(nonce), commit)) return false;
+    this.resolveNonce(bytes(nonce));
+    return true;
+  }
 
   private key(label: string, from: string, to: string): Promise<CryptoKey> {
     return hkdf(this.secret, utf8("veil/v1"), `chan/${label}/${from}>${to}`).then((raw) =>

@@ -13,9 +13,9 @@
     "bindKey": "bff0ebb6b79759b6d871f379703aea464eaf4eb25f2b41303c48c9e176280cae"
   },
   "envelope": {
-    "wire": "4b545a760117fb063471.h_NtWTZRgsCmMUE5ua7D7MezU5DWa9T4-YxGEV9lsMtcnw-OmziGevZt8j6Za2lB8NUh-Jv4Ea0zrMaDSGcT2msPZSFbNl0StPE-hxzfQ-rSREluo5lzznB0v57tULPOHdGuc7iwulZRStT7EI0UzARkgB35uepjgjSKcUqG7-6WVrI41awM7DdfvLEp3LvMM_CdOI4R8scCBN9wCRLSxdBRfsNpQaS-hlPR9KF1Ny4bF9UrtkbkmH0jNtV5g24Gvi-1LJESINFVjbEY7tga_xzUCiZCNCmW2s5fRVTf2qy2to84IKfFJ5blayNtT6bJjJQolYLTDJOF5Tutph-sFeKYZSm4GAdcqcUm-cHvuuidgt7qTJkoYV1MMvbONmLQL-dfaExzuGclEue-x5XTI6va67OvuEUMYq6aNxg2OnWYIejceA",
+    "wire": "069b26b84c758230b481.E-5QDb9N65sBbXbxHgKODvMaOni72hWXE5le8hIS0yT1g2JFNOeuTKNM03jWvcZTk5YuwIgY1zu46L_AZiSmo3Qu_a_0rnJ7itUWolkAPCQVZdqbwrKS7LfcRsvSswZl_ykkRFy2JjFsiRI9Ti53R41t0WHUat1n7J_AKeAnppCU2Y_W1_0cBXK96lHO3Q9orQ4BjeyR4gmWQN-WBB6dL_TiRQoPi_ael1P8C1VbD0kPGjNDTIYkTpc81xtP5dxzvSL378LAvEWLcruWASnbaysdAHDQuG6z1qigEjrBxoWy3l_mPGDd6QHPuwzPrr8l1ngi8_eWFlnEAjOqSuvKxlYtqNLtuqqZHqJ8eeB4jMMdc2HBlxfMOx9AAT5KMmzz_izC1m_vqyCSS8xzIOC4fPMs1FzEYV1jSfklmkiEP1DyBd3INTmq",
     "ts": 1728000001234,
-    "from": "4b545a760117fb063471",
+    "from": "069b26b84c758230b481",
     "sdp": "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\na=fingerprint:sha-256 AA:BB:CC\r\n",
     "to": "fedcba9876543210fedc",
     "session": "sess"
@@ -25,13 +25,16 @@
     "a": {
       "peerId": "aaaaaaaaaaaaaaaaaaaa",
       "edPub": "0101010101010101010101010101010101010101010101010101010101010101",
-      "fingerprint": "sha-256 AB:CD"
+      "fingerprint": "sha-256 AB:CD",
+      "nonce": "0303030303030303030303030303030303030303030303030303030303030303"
     },
     "b": {
       "peerId": "bbbbbbbbbbbbbbbbbbbb",
       "edPub": "0202020202020202020202020202020202020202020202020202020202020202",
-      "fingerprint": "sha-256 EF:01"
+      "fingerprint": "sha-256 EF:01",
+      "nonce": "0404040404040404040404040404040404040404040404040404040404040404"
     },
-    "names": ["Fish", "Globe", "Clock", "Umbrella"]
+    "names": ["Folder", "Gift", "Pin", "Hammer"],
+    "commitA": "bb1b6756711a13187fccb0f8904100009b244e5b4389601fbe63f8a5a09c16ad"
   }
 }

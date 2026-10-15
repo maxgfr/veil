@@ -404,7 +404,7 @@ export class RoomSession {
     if (open) this.unread.value = 0;
   }
 
-  async sas(peerId: string): Promise<Sas | null> {
+  async sas(peerId: string): Promise<Sas | "outdated" | null> {
     return this.room.sas(peerId);
   }
 
