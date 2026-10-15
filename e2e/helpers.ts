@@ -12,6 +12,8 @@ export interface TestSettings {
   nostr?: boolean;
   torrent?: boolean;
   manual?: boolean;
+  /** Seed the settings once per tab, so what the app saves survives a reload. */
+  persist?: boolean;
 }
 
 /** Local relay/tracker only, no STUN: tests never touch the public network. */
@@ -45,9 +47,14 @@ export async function member(
     acceptDownloads: true,
     ...extra,
   });
-  await ctx.addInitScript((s) => {
-    localStorage.setItem("veil.settings.v1", s);
-  }, settingsJson(o));
+  await ctx.addInitScript(
+    ({ s, once }) => {
+      if (once && sessionStorage.getItem("veil.test.seeded")) return;
+      localStorage.setItem("veil.settings.v1", s);
+      if (once) sessionStorage.setItem("veil.test.seeded", "1");
+    },
+    { s: settingsJson(o), once: o.persist ?? false },
+  );
   const page = await ctx.newPage();
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -347,4 +354,39 @@ export function fakeAiWorker(): void {
       return Reflect.construct(target, args);
     },
   });
+}
+
+/**
+ * Init script: `getDisplayMedia` hands back a canvas that keeps changing, as a
+ * shared screen would, in place of the browser's picker.
+ */
+export function fakeDisplayMedia(): void {
+  navigator.mediaDevices.getDisplayMedia = async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    const g = canvas.getContext("2d");
+    if (!g) throw new Error("No 2D canvas for the fake screen");
+    let n = 0;
+    const draw = () => {
+      n++;
+      g.fillStyle = "#1d3557";
+      g.fillRect(0, 0, canvas.width, canvas.height);
+      g.fillStyle = "#f1faee";
+      g.font = "48px sans-serif";
+      g.fillText(`Shared slide, frame ${n}`, 40, 100);
+      g.fillRect((n * 8) % canvas.width, canvas.height / 2, 80, 80);
+    };
+    draw();
+    const timer = setInterval(draw, 66);
+    const stream = canvas.captureStream(15);
+    for (const track of stream.getVideoTracks()) {
+      const stop = track.stop.bind(track);
+      track.stop = () => {
+        clearInterval(timer);
+        stop();
+      };
+    }
+    return stream;
+  };
 }

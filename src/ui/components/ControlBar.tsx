@@ -1,7 +1,8 @@
 import type { JSX } from "preact";
-import { useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { RoomMode } from "../../crypto/room";
 import type { RoomSession } from "../session";
+import { type Layout, saveSettings, settings } from "../settings";
 import { Icon, type IconName } from "./Icons";
 
 function Control(props: {
@@ -26,6 +27,78 @@ function Control(props: {
       <Icon name={props.icon} size={22} />
       {!!props.badge && <span class="badge tabular">{props.badge > 99 ? "99+" : props.badge}</span>}
     </button>
+  );
+}
+
+const LAYOUTS: { value: Layout; label: string; hint: string }[] = [
+  { value: "auto", label: "Auto", hint: "Large when someone shares or you pin" },
+  { value: "grid", label: "Grid", hint: "Everyone the same size" },
+  { value: "spotlight", label: "Spotlight", hint: "One in large, the rest beside" },
+];
+
+/** Grid, Spotlight or Auto: how this device lays out the call. */
+function LayoutMenu(): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      if (!(e.target instanceof Node && root.current?.contains(e.target))) setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setOpen(false);
+    };
+    addEventListener("pointerdown", away);
+    addEventListener("keydown", key);
+    return () => {
+      removeEventListener("pointerdown", away);
+      removeEventListener("keydown", key);
+    };
+  }, [open]);
+  const current = settings.value.layout;
+  return (
+    <div class="layout-menu" ref={root}>
+      <button
+        type="button"
+        class="control"
+        aria-label="Layout"
+        title="Layout"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        data-testid="layout"
+      >
+        <Icon name="layout" size={22} />
+      </button>
+      {open && (
+        <div class="menu" role="menu" aria-label="Layout">
+          {LAYOUTS.map((l) => (
+            <button
+              key={l.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={current === l.value}
+              class="menu-item"
+              onClick={() => {
+                saveSettings({ ...settings.value, layout: l.value });
+                setOpen(false);
+              }}
+              data-testid={`layout-${l.value}`}
+            >
+              <span class="menu-check" aria-hidden="true">
+                {current === l.value && <Icon name="check" size={16} />}
+              </span>
+              <span>
+                <span class="menu-label">{l.label}</span>
+                <span class="menu-hint">{l.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -74,8 +147,10 @@ export function ControlBar(props: {
               pressed={m.screenOn}
               tone={m.screenOn ? "on" : undefined}
               onClick={() => void s.toggleScreen()}
+              testid="toggle-screen"
             />
           )}
+          <LayoutMenu />
           {canRecord && (
             <Control
               icon="record"

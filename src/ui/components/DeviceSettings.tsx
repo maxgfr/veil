@@ -6,8 +6,13 @@ import type { JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { type DeviceInfo, listDevices, type MediaKind, openDevices } from "../../features/devices";
 import type { RoomSession } from "../session";
-import { saveSettings, settings } from "../settings";
+import { type ScreenQuality, saveSettings, settings } from "../settings";
 import { Icon } from "./Icons";
+
+const SCREEN_QUALITIES: { value: ScreenQuality; label: string }[] = [
+  { value: "detail", label: "Text & detail" },
+  { value: "motion", label: "Motion" },
+];
 
 /** Input level of a stream, 0–1, sampled ~15 times per second. */
 export function useAudioLevel(stream: MediaStream | null): number {
@@ -191,6 +196,11 @@ export function DeviceSettings(props: {
     }
   };
 
+  const chooseQuality = async (screenQuality: ScreenQuality) => {
+    if (props.session) await props.session.setScreenQuality(screenQuality);
+    else saveSettings({ ...settings.value, screenQuality });
+  };
+
   return (
     <fieldset class="group" data-testid="device-settings">
       <legend>Microphone & camera</legend>
@@ -244,6 +254,25 @@ export function DeviceSettings(props: {
           <video ref={video} class="mirror" autoPlay playsInline muted data-testid="cam-preview" />
         </div>
       )}
+      <fieldset class="field field-set">
+        <legend class="label">Screen sharing</legend>
+        <div class="segmented">
+          {SCREEN_QUALITIES.map((q) => (
+            <button
+              key={q.value}
+              type="button"
+              aria-pressed={settings.value.screenQuality === q.value}
+              onClick={() => void chooseQuality(q.value)}
+              data-testid={`screen-quality-${q.value}`}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
+        <span class="hint">
+          Text & detail keeps slides and code sharp. Motion keeps video smooth.
+        </span>
+      </fieldset>
       {error && (
         <p class="error" role="alert">
           {error}

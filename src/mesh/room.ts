@@ -52,6 +52,8 @@ export interface Member {
   peerId: string;
   nick: string;
   e2ee: boolean;
+  /** Optional features the member announced ("screen-track"). */
+  caps: readonly string[];
   edPub: Bytes;
   xPub: Bytes;
   media: MediaState;
@@ -77,6 +79,8 @@ export interface RoomOptions {
   degree?: number;
   /** Advertised in presence: this browser can end-to-end encrypt media frames. */
   e2ee?: boolean;
+  /** Advertised in presence: optional features this client supports. */
+  caps?: string[];
   /** Test hook: pre-derived secrets (skips PBKDF2). */
   secrets?: RoomSecrets;
 }
@@ -600,6 +604,7 @@ export class Room {
       peerId: author,
       nick: p.nick.trim().slice(0, 40) || "Guest",
       e2ee: p.e2ee ?? false,
+      caps: p.caps ?? [],
       edPub: fromB64u(frame.edPub),
       xPub,
       media: p.media,
@@ -693,6 +698,7 @@ export class Room {
       e2ee: this.o.e2ee ?? false,
       keyId: this.keys.keyId,
     };
+    if (this.o.caps?.length) presence.caps = this.o.caps;
     if (this.wantKeys.size) presence.want = [...this.wantKeys];
     this.ownPresence = await this.gossip.publish("presence", utf8(JSON.stringify(presence)));
   }

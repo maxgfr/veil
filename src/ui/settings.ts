@@ -28,6 +28,11 @@ export interface AiSettings {
   speechModel: string | null;
 }
 
+/** How a screen share is captured: sharp text at a low frame rate, or smooth motion. */
+export type ScreenQuality = "detail" | "motion";
+/** How the call stage is laid out on this device. */
+export type Layout = "auto" | "grid" | "spotlight";
+
 export interface Settings {
   nick: string;
   nostr: { enabled: boolean; relays: string[] };
@@ -38,6 +43,8 @@ export interface Settings {
   audioDevice: string;
   videoDevice: string;
   ai: AiSettings;
+  screenQuality: ScreenQuality;
+  layout: Layout;
 }
 
 export function defaultSettings(): Settings {
@@ -51,6 +58,8 @@ export function defaultSettings(): Settings {
     audioDevice: "",
     videoDevice: "",
     ai: { model: null, translateChat: false, speechModel: null },
+    screenQuality: "detail",
+    layout: "auto",
   };
 }
 
@@ -109,6 +118,12 @@ export function parseSettings(raw: string | null): Settings {
           ? ai.speechModel
           : d.ai.speechModel,
     },
+    screenQuality:
+      x.screenQuality === "detail" || x.screenQuality === "motion"
+        ? x.screenQuality
+        : d.screenQuality,
+    layout:
+      x.layout === "auto" || x.layout === "grid" || x.layout === "spotlight" ? x.layout : d.layout,
   };
 }
 
