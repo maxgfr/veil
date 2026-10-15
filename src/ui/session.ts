@@ -555,8 +555,6 @@ export class RoomSession {
   /** Records the call on this device: everyone is told through our presence. */
   async startRecording(): Promise<void> {
     if (this.recording.value !== "idle") return;
-    // The recording's transcript comes from our captions: ready them while the click lasts.
-    this.installCaptions();
     // The previous recording's sheet is closed by now: its files can go.
     this.recorder?.dispose();
     const recorder = new Recorder({
