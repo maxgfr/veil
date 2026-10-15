@@ -208,22 +208,6 @@ describe("AiEngine", () => {
     expect(req).toEqual({ id: req.id, op: "cacheState", modelId: QWEN });
   });
 
-  test("transcribe sends a copy of the samples, transferred, with the language", async () => {
-    const { engine, worker } = await loaded(GEMMA);
-    const pcm = new Float32Array([0.1, 0.2]);
-    const p = engine.transcribe(pcm, { lang: "fr" });
-    const req = worker().last();
-    expect(req.op).toBe("transcribe");
-    if (req.op !== "transcribe") throw new Error("unreachable");
-    expect([...req.pcm]).toEqual([...pcm]);
-    expect(req.pcm).not.toBe(pcm);
-    expect(req.lang).toBe("fr");
-    expect(worker().transfers.at(-1)).toEqual([req.pcm.buffer]);
-    worker().reply({ id: req.id, kind: "text", text: "bonjour" });
-    expect(await p).toBe("bonjour");
-    expect(pcm.length).toBe(2);
-  });
-
   test("remove of the loaded model unloads it; unload resets", async () => {
     const { engine, worker } = await loaded();
     const p = engine.remove(QWEN);

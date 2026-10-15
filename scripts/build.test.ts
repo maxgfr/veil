@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { auditHtml, type BuildResult, build, CSP } from "./build";
+import { auditHtml, type BuildResult, build, CSP, ORT_RUNTIME } from "./build";
 import { BUDGET_GZIP, initialScripts } from "./check-size";
 
 let out: BuildResult;
@@ -92,6 +92,52 @@ describe("build output", () => {
     expect(read(out.aiWorker)).toContain(marker);
     for (const f of out.files.filter((f) => f.endsWith(".js") && f !== out.aiWorker))
       expect(read(f)).not.toContain(marker);
+  });
+
+  test("the speech worker and ONNX Runtime's files are cached on first use, not precached", () => {
+    const sw = read("sw.js");
+    expect(out.speechWorker).toMatch(/^assets\/speech-worker-[a-z0-9]+\.js$/);
+    expect(out.ortFiles.map((f) => f.replace(/-[0-9a-f]{8}\./, "."))).toEqual(
+      ORT_RUNTIME.map((n) => `assets/${n}`),
+    );
+    const precache = /\["\.\/"(?:,"[^"]+")*\]/.exec(sw)?.[0] ?? "";
+    for (const f of [out.speechWorker, ...out.ortFiles]) {
+      expect(precache).not.toContain(f);
+      expect(sw).toContain(`./${f}`);
+    }
+    expect(sw).toContain("veil-speech-engine");
+    // The runtime is large: it is why it is not precached.
+    const wasm = out.ortFiles.filter((f) => f.endsWith(".wasm"));
+    expect(wasm.length).toBe(2);
+    for (const f of wasm) expect(statSync(join(dir, f)).size).toBeGreaterThan(10e6);
+  });
+
+  test("transformers.js and ONNX Runtime are bundled into the speech worker and nowhere else", () => {
+    // Strings only transformers.js's and ONNX Runtime's runtimes carry.
+    const markers = [
+      "Must implement _call method in subclass",
+      "multiple calls to 'initializeWebAssembly()' detected.",
+    ];
+    const worker = read(out.speechWorker);
+    for (const m of markers) expect(worker).toContain(m);
+    for (const f of out.files.filter((f) => f.endsWith(".js") && f !== out.speechWorker))
+      for (const m of markers) expect(read(f)).not.toContain(m);
+  });
+
+  test("no runtime code comes from a CDN: ONNX Runtime is served by this origin", () => {
+    const cdn = /cdn\.jsdelivr\.net|unpkg\.com/g;
+    for (const f of out.files.filter((f) => /\.(m?js|css|html)$/.test(f) && f !== out.speechWorker))
+      expect(read(f)).not.toMatch(cdn);
+    // transformers.js carries one CDN URL: the default it gives ONNX Runtime's
+    // `wasmPaths` when it loads. The worker then sets `wasmPaths` to the files
+    // copied next to it (their names are in it) and turns off transformers.js's
+    // re-fetch of them, so that URL is never requested.
+    const worker = read(out.speechWorker);
+    expect(worker.match(cdn)).toEqual(["cdn.jsdelivr.net"]);
+    expect(worker).toContain("cdn.jsdelivr.net/npm/onnxruntime-web@");
+    for (const f of out.ortFiles) expect(worker).toContain(`"${f.slice("assets/".length)}"`);
+    expect(worker).toMatch(/\.wasmPaths=\{mjs:/);
+    expect(worker).toMatch(/\.useWasmCache=!1/);
   });
 
   test("the manifest is installable and its icons exist", () => {

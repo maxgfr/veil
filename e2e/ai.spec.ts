@@ -7,11 +7,14 @@ import {
   fakeAiWorker,
   fakeBuiltinAi,
   fakeDevice,
+  fakeMicSpeaking,
   fakeSpeechSaying,
+  fakeSpeechWorker,
   joinRoom,
   type Member,
   member,
   noHorizontalOverflow,
+  noWebSpeech,
   openChat,
   say,
   waitLinks,
@@ -197,6 +200,176 @@ test("a downloaded model never loads without a click: chat and captions stay unt
   expect(b.errors).toEqual([]);
   await a.ctx.close();
   await b.ctx.close();
+});
+
+const WHISPER_SMALL = "onnx-community/whisper-small";
+type SpeechReq = { op: string; modelId?: string; download?: boolean };
+const speechReqs = (page: Page) =>
+  page.evaluate(() => (window as unknown as { speechReqs: SpeechReq[] }).speechReqs);
+
+test("without speech recognition on the device, captions come from the downloaded Whisper model", async ({
+  browser,
+}) => {
+  const a = await member(browser);
+  await a.ctx.addInitScript(fakeBuiltinAi);
+  await a.ctx.addInitScript(noWebSpeech);
+  await a.ctx.addInitScript(fakeMicSpeaking);
+  await a.ctx.addInitScript(fakeSpeechWorker, {
+    cached: [WHISPER_SMALL],
+    text: "hello from whisper",
+  });
+  await a.ctx.addInitScript(aiSettings, {
+    model: null,
+    translateChat: false,
+    speechModel: WHISPER_SMALL,
+  });
+  await createRoom(a, "Ada");
+  await a.page.getByTestId("toggle-mic").click();
+  await a.page.getByTestId("toggle-captions").click();
+
+  await expect(
+    a.page.getByTestId("live-caption").filter({ hasText: "hello from whisper" }).first(),
+  ).toBeVisible();
+  const reqs = await speechReqs(a.page);
+  // Loaded from the cache only: nothing is downloaded without a click.
+  expect(reqs.filter((r) => r.op === "load")).toEqual([
+    expect.objectContaining({ op: "load", modelId: WHISPER_SMALL, download: false }),
+  ]);
+  expect(reqs.some((r) => r.op === "transcribe")).toBe(true);
+
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
+});
+
+test("the AI settings offer Whisper with its size, and download it on a click", async ({
+  browser,
+}) => {
+  const a = await member(browser);
+  // WebGPU with shader-f16 and room: large-v3 turbo is recommended.
+  await a.ctx.addInitScript(fakeDevice, { memory: 8, quota: 100e9, usage: 0 });
+  await a.ctx.addInitScript(fakeSpeechWorker, { cached: [], text: "" });
+  await createRoom(a, "Ada");
+  await a.page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  const speech = a.page.getByTestId("speech-settings");
+  await expect(speech).toContainText("Used for captions and recordings");
+  const card = speech.getByTestId("speech-model");
+  await expect(card).toContainText("Whisper large-v3 turbo");
+  await expect(card).toContainText("566 MB download");
+  await speech.getByText("Other Whisper models").click();
+  // Sized for WebGPU with fp16: an fp16 encoder and a q4 decoder.
+  await expect(speech).toContainText("Whisper base");
+  await expect(speech).toContainText("168 MB download");
+  await expect(speech).toContainText("Whisper small");
+  await expect(speech).toContainText("413 MB download");
+  await expect(a.page.getByText("Transcribe with Gemma")).toHaveCount(0);
+  await expect(a.page.getByText("Requires Gemma 4 E2B")).toHaveCount(0);
+  // Nothing loads before the click.
+  expect((await speechReqs(a.page)).some((r) => r.op === "load")).toBe(false);
+
+  await card.getByTestId("speech-download").click();
+  await expect(card.getByTestId("speech-in-use")).toBeVisible();
+  expect((await speechReqs(a.page)).filter((r) => r.op === "load")).toEqual([
+    expect.objectContaining({ modelId: "onnx-community/whisper-large-v3-turbo", download: true }),
+  ]);
+  await card.getByTestId("speech-delete").click();
+  await expect(card.getByTestId("speech-download")).toBeVisible();
+
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
+});
+
+test("Delete all AI data frees every cached model, after a confirmation, and nothing else", async ({
+  browser,
+}) => {
+  const a = await member(browser);
+  await a.ctx.addInitScript(fakeDevice, { memory: 8, quota: 100e9, usage: 0 });
+  await createRoom(a, "Ada");
+  // A WebLLM model (5 MB of weights), the start of a Whisper download, and a cache that isn't AI's.
+  await a.page.evaluate(async () => {
+    const repo = "https://huggingface.co/mlc-ai/Qwen3.5-2B-q4f16_1-MLC/resolve/main/";
+    const model = await caches.open("webllm/model");
+    const records = [{ dataPath: "params_shard_0.bin", nbytes: 5_000_000 }];
+    await model.put(`${repo}tensor-cache.json`, new Response(JSON.stringify({ records })));
+    await model.put(`${repo}params_shard_0.bin`, new Response("weights"));
+    const whisper = await caches.open("transformers-cache");
+    await whisper.put(
+      "https://huggingface.co/onnx-community/whisper-small/resolve/main/config.json",
+      new Response("{}"),
+    );
+    await (await caches.open("keep-me")).put("https://example.com/x", new Response("x"));
+  });
+  await a.page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  const button = a.page.getByTestId("ai-delete-all-button");
+  await expect(button).toHaveText("Delete all AI data (5 MB)");
+  await expect(a.page.getByTestId("ai-delete-all")).toContainText("chrome://on-device-internals");
+  await button.click();
+  await a.page.getByTestId("ai-delete-all-confirm").click();
+
+  await expect(button).toHaveText("Delete all AI data (0 MB)");
+  const speech = a.page.getByTestId("speech-model");
+  await expect(speech.getByTestId("speech-download")).toHaveText("Download");
+  await expect(a.page.getByTestId("speech-delete")).toHaveCount(0);
+  await expect(a.page.getByTestId("ai-delete")).toHaveCount(0);
+  await expect(a.page.getByTestId("ai-delete-all-error")).toHaveCount(0);
+  const left = await a.page.evaluate(() => caches.keys());
+  expect(left).toContain("keep-me");
+  for (const name of ["webllm/model", "webllm/config", "webllm/wasm", "transformers-cache"])
+    expect(left).not.toContain(name);
+
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
+});
+
+test("every built-in model row shows a status, whatever the browser answers", async ({
+  browser,
+}) => {
+  const a = await member(browser);
+  await a.ctx.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    const create = async () => ({ destroy() {} });
+    // An answer from before the spec, a model Chrome can't run, and a probe that
+    // first never answers, then does.
+    w.LanguageDetector = { availability: async () => "readily", create };
+    w.Summarizer = { availability: async () => "unavailable", create };
+    let probes = 0;
+    w.Translator = {
+      availability: () => (++probes === 1 ? new Promise(() => {}) : Promise.resolve("available")),
+      create,
+    };
+  });
+  await createRoom(a, "Ada");
+  await a.page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  const row = (name: string) => a.page.getByTestId(`ai-builtin-${name}`);
+  await expect(row("languageDetector").getByTestId("ai-builtin-status")).toHaveText(
+    "Not available",
+  );
+  await expect(row("summarizer").getByTestId("ai-builtin-status")).toHaveText("Not available");
+  await expect(a.page.getByText("Chrome needs its Gemini Nano model")).toBeVisible();
+  await expect(row("translator").getByTestId("ai-builtin-status")).toHaveText("Couldn't check");
+  await row("translator").getByRole("button", { name: "Retry" }).click();
+  await expect(row("translator").getByTestId("ai-builtin-status")).toHaveText("Ready");
+
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
+});
+
+test("the Language detection row always shows a status in this browser", async ({ browser }) => {
+  const a = await member(browser);
+  await createRoom(a, "Ada");
+  await a.page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  const row = a.page.getByTestId("ai-builtin-languageDetector");
+  await expect(row).toBeVisible();
+  // A status, or the Download button of a model the browser can fetch.
+  await expect(row).toContainText(
+    /Ready|Downloads on first use|Downloading…|Not available|Couldn't check|Download/,
+  );
+
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
 });
 
 test("when the downloaded model fails to load, Summarize still makes notes and says why", async ({

@@ -9,7 +9,6 @@
  * downloads ever leaves the device.
  */
 import {
-  type ChatCompletionMessageParam,
   deleteModelAllInfoInCache,
   MLCEngine,
   ModelType,
@@ -46,10 +45,6 @@ let current: string | null = null;
 const queue = new GenerationQueue(async () => {
   await engine?.interruptGenerate();
 });
-
-const TRANSCRIBE_PROMPT =
-  "Transcribe this audio word for word, in the language spoken. Reply with the transcript only, " +
-  "without translating, summarizing or commenting. Reply with nothing if no one speaks.";
 
 function send(message: AiResponse): void {
   scope.postMessage(message);
@@ -121,32 +116,6 @@ async function handle(req: AiRequest): Promise<void> {
           send({ id: req.id, kind: "delta", delta });
         }
         send({ id: req.id, kind: "text", text });
-      });
-      return;
-    }
-    case "transcribe": {
-      await queue.run(req.id, async () => {
-        if (!current?.includes("gemma-4-E2B")) throw new Error("this model does not take audio");
-        const lang = req.lang ? ` The speaker's language is probably ${req.lang}.` : "";
-        const messages: ChatCompletionMessageParam[] = [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_audio",
-                input_audio: { data: req.pcm, format: "pcm_f32", sample_rate: 16_000 },
-              },
-              { type: "text", text: TRANSCRIBE_PROMPT + lang },
-            ],
-          },
-        ];
-        const res = await loaded().chat.completions.create({
-          messages,
-          temperature: 0,
-          stream: false,
-        });
-        if (!queue.wanted(req.id)) throw abortError();
-        send({ id: req.id, kind: "text", text: (res.choices[0]?.message.content ?? "").trim() });
       });
       return;
     }

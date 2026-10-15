@@ -7,20 +7,22 @@
 import { computed, signal } from "@preact/signals";
 import { saveSettings, settings } from "../ui/settings";
 import type { Availability } from "./builtin";
+import { type CacheStorageLike, deleteAiCaches } from "./caches";
 import type { DeviceInfo } from "./device";
 import type { AiEngine } from "./engine";
-import type { ModelChoice, Recommendation } from "./models";
+import type { Recommendation } from "./models";
 import type { LoadProgress, ModelCacheState } from "./protocol";
+import { detectSpeech, speechCache, stopSpeechEngine } from "./speechStore";
 
 export type AiStatus = "idle" | "loading" | "ready" | "error";
 export type BuiltinName = "summarizer" | "translator" | "languageDetector";
+/** What a built-in model's row shows: its availability, or "unknown" when the probe never answered. */
+export type BuiltinState = Availability | "unknown";
 
 /** The device, as last detected; null until the AI settings were shown once. */
 export const aiDevice = signal<DeviceInfo | null>(null);
 export const aiRecommendation = signal<Recommendation | null>(null);
 export const aiDetecting = signal(false);
-/** The audio model build (Gemma 4 E2B) that fits this device, whatever ranks first; null if none. */
-export const aiAudioFit = signal<ModelChoice | null>(null);
 /** What of each model is cached, per model id (filled as models are looked at). */
 export const aiCache = signal<Readonly<Record<string, ModelCacheState>>>({});
 /** Progress of the running download or load; null when none runs. */
@@ -29,12 +31,28 @@ export const aiStatus = signal<AiStatus>("idle");
 export const aiError = signal<string | null>(null);
 /** The model loaded (or loading) in the engine. */
 export const aiModelId = signal<string | null>(null);
-/** A model is loaded and usable: summaries, translation and transcription may use it. */
+/** A model is loaded and usable: summaries and translation may use it. */
 export const aiReady = computed(() => aiStatus.value === "ready" && aiModelId.value !== null);
 /** The browser's built-in models (Chrome); null until detected. */
-export const aiBuiltin = signal<Readonly<Record<BuiltinName, Availability>> | null>(null);
+export const aiBuiltin = signal<Readonly<Record<BuiltinName, BuiltinState>> | null>(null);
 /** Download progress (0..1) of built-in models being fetched. */
 export const aiBuiltinProgress = signal<Readonly<Partial<Record<BuiltinName, number>>>>({});
+
+/**
+ * Bytes "Delete all AI data" frees: the weights of every WebLLM model cached
+ * (as last detected) and of every Whisper model.
+ */
+export const aiDataBytes = computed(() => {
+  let bytes = 0;
+  for (const n of Object.values(aiDevice.value?.cached ?? {})) bytes += n;
+  for (const s of Object.values(speechCache.value)) bytes += s.bytes;
+  return bytes;
+});
+/** "Delete all AI data" is running; `error` says what it couldn't delete. */
+export const aiWipe = signal<{ busy: boolean; error: string | null }>({
+  busy: false,
+  error: null,
+});
 
 /**
  * Set by `openAiSettings()`: the Settings sheet scrolls to "AI on this device"
@@ -67,15 +85,15 @@ function probePair(): { sourceLanguage: string; targetLanguage: string } {
 
 /**
  * How long one built-in `availability()` may take. Some browsers never settle
- * it (headless Chromium); past this the model shows as "unavailable", i.e.
- * unknown, rather than holding up the settings.
+ * it (headless Chromium); past this the model shows as "unknown", with a way
+ * to check again, rather than holding up the settings.
  */
 export const BUILTIN_PROBE_MS = 3000;
 
-function bounded(probe: Promise<Availability>): Promise<Availability> {
+function bounded(probe: Promise<Availability>): Promise<BuiltinState> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<Availability>((resolve) => {
-    timer = setTimeout(() => resolve("unavailable"), BUILTIN_PROBE_MS);
+  const late = new Promise<BuiltinState>((resolve) => {
+    timer = setTimeout(() => resolve("unknown"), BUILTIN_PROBE_MS);
   });
   return Promise.race([probe, late]).finally(() => clearTimeout(timer));
 }
@@ -92,35 +110,42 @@ async function detectBuiltin(): Promise<void> {
   aiBuiltin.value = { summarizer, translator, languageDetector };
 }
 
+/** Probes the built-in models again: the "Retry" of a row that couldn't be checked. */
+export function recheckBuiltin(): Promise<void> {
+  aiBuiltin.value = null;
+  return detectBuiltin().catch(report);
+}
+
 /**
- * Reads the device, ranks the models and the cache of the ones on offer. The
- * built-in models are probed alongside: the model card never waits on them.
+ * Reads the device, ranks the models and the cache of the ones on offer, and
+ * which Whisper model to offer. The built-in models are probed alongside: the
+ * model card never waits on them.
  */
 export async function detectAi(): Promise<void> {
   if (aiDetecting.value) return;
   aiDetecting.value = true;
   void detectBuiltin().catch(report);
   try {
-    const [{ detectDevice }, { audioModelFit, recommendLocal }] = await Promise.all([
+    const [{ detectDevice }, { recommendLocal }] = await Promise.all([
       import("./device"),
       import("./models"),
     ]);
     const device = await detectDevice();
     const rec = recommendLocal(device);
-    const audio = audioModelFit(device);
     aiDevice.value = device;
     aiRecommendation.value = rec;
-    aiAudioFit.value = audio;
     const ids = new Set(
       [
         settings.value.ai.model,
-        audio?.id,
         rec.fits?.id,
         rec.best?.id,
         ...rec.alternatives.map((m) => m.id),
       ].filter((id): id is string => !!id),
     );
-    if (!rec.unsupported) await Promise.all([...ids].map(refreshCache));
+    await Promise.all([
+      rec.unsupported ? [] : Promise.all([...ids].map(refreshCache)),
+      detectSpeech(device),
+    ]);
   } catch (err) {
     report(err);
   } finally {
@@ -271,4 +296,38 @@ export async function downloadBuiltin(name: BuiltinName): Promise<void> {
     aiBuiltinProgress.value = rest;
     await detectBuiltin();
   }
+}
+
+/** Terminates the AI worker (a download included) and forgets the loaded model. */
+async function stopAiEngine(): Promise<void> {
+  aiModelId.value = null;
+  aiStatus.value = "idle";
+  aiProgress.value = null;
+  (await engine()).cancel();
+}
+
+/**
+ * "Delete all AI data", from a click: stops both engines, deletes every AI
+ * cache (every WebLLM model, every Whisper model, the cached engines) and
+ * nothing else, forgets the chosen models, then detects again. What couldn't
+ * be deleted is in `aiWipe.error`. Chrome's built-in models are Chrome's.
+ */
+export async function deleteAllAiData(
+  storage: CacheStorageLike | undefined = globalThis.caches,
+): Promise<void> {
+  aiWipe.value = { busy: true, error: null };
+  let error: string | null = null;
+  try {
+    await Promise.all([stopAiEngine(), stopSpeechEngine()]);
+    const failed = storage ? await deleteAiCaches(storage) : [];
+    if (failed.length) error = `Couldn't delete ${failed.join(", ")}.`;
+  } catch (err) {
+    error = `Couldn't delete the AI data: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  saveSettings({ ...settings.value, ai: { ...settings.value.ai, model: null, speechModel: null } });
+  aiCache.value = {};
+  speechCache.value = {};
+  aiError.value = null;
+  await detectAi();
+  aiWipe.value = { busy: false, error };
 }

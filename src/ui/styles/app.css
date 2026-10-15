@@ -1958,6 +1958,12 @@ textarea.input {
   min-width: 0;
 }
 
+/* A download in progress takes the whole row. */
+.ai-grow {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
 /* ── live captions ────────────────────────────────────────────────────── */
 .chip-cc {
   background: oklch(1 0 0 / 0.16);

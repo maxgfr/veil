@@ -159,28 +159,6 @@ export class AiEngine {
     );
   }
 
-  /** Transcribes 16 kHz mono PCM; needs an audio model (Gemma 4 E2B). */
-  transcribe(
-    pcm16k: Float32Array,
-    opts: { lang?: string; signal?: AbortSignal } = {},
-  ): Promise<string> {
-    if (!this.#ready) return Promise.reject(new Error("no model is loaded"));
-    // A copy goes over, so the caller keeps its samples.
-    const pcm = pcm16k.slice();
-    const lang = opts.lang;
-    return this.#ask<string>(
-      (id) => (lang ? { id, op: "transcribe", pcm, lang } : { id, op: "transcribe", pcm }),
-      (res, resolve, reject) => {
-        if (res.kind === "text") resolve(res.text);
-        else if (res.kind === "error") reject(fromWire(res.error));
-        else return false;
-        return true;
-      },
-      opts.signal,
-      [pcm.buffer],
-    );
-  }
-
   cacheState(modelId: string): Promise<ModelCacheState> {
     return this.#ask<ModelCacheState>(
       (id) => ({ id, op: "cacheState", modelId }),

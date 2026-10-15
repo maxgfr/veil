@@ -16,6 +16,7 @@
     "check-size": "bun scripts/check-size.ts"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.0",
     "@mlc-ai/web-llm": "0.2.86",
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",

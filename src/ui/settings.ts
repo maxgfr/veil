@@ -21,8 +21,11 @@ export interface AiSettings {
   model: string | null;
   /** Translate chat messages into the user's language as they arrive. */
   translateChat: boolean;
-  /** Transcribe with the on-device model (an audio model) instead of the browser's recognizer. */
-  modelTranscribe: boolean;
+  /**
+   * The Whisper model (a Hugging Face repo) that transcribes when the browser can't
+   * recognize speech on the device; null for none. Set when its download starts.
+   */
+  speechModel: string | null;
 }
 
 export interface Settings {
@@ -47,7 +50,7 @@ export function defaultSettings(): Settings {
     turn: null,
     audioDevice: "",
     videoDevice: "",
-    ai: { model: null, translateChat: false, modelTranscribe: false },
+    ai: { model: null, translateChat: false, speechModel: null },
   };
 }
 
@@ -101,8 +104,10 @@ export function parseSettings(raw: string | null): Settings {
     ai: {
       model: typeof ai.model === "string" && ai.model.length < 256 ? ai.model : d.ai.model,
       translateChat: typeof ai.translateChat === "boolean" ? ai.translateChat : d.ai.translateChat,
-      modelTranscribe:
-        typeof ai.modelTranscribe === "boolean" ? ai.modelTranscribe : d.ai.modelTranscribe,
+      speechModel:
+        typeof ai.speechModel === "string" && ai.speechModel.length < 256
+          ? ai.speechModel
+          : d.ai.speechModel,
     },
   };
 }

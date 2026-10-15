@@ -92,18 +92,34 @@ export function builtinApis(scope: object = globalThis): BuiltinApis {
   return out;
 }
 
-/** The availability as reported, or "unavailable" when the API is missing or the probe throws. */
+const AVAILABILITIES: ReadonlySet<unknown> = new Set([
+  "available",
+  "downloadable",
+  "downloading",
+  "unavailable",
+]);
+
+function isAvailability(x: unknown): x is Availability {
+  return AVAILABILITIES.has(x);
+}
+
+/**
+ * The availability as reported, or "unavailable" when the API is missing, the
+ * probe throws, or the answer is none of the four (older builds said "readily").
+ */
 export async function availabilityOf<O>(
   api: { availability(opts: O): Promise<Availability> } | undefined,
   opts: O,
 ): Promise<Availability> {
   if (!api) return "unavailable";
+  let answer: unknown;
   try {
-    return await api.availability(opts);
+    answer = await api.availability(opts);
   } catch {
     // A probe that throws (bad language tag, policy) means the same as "unavailable".
     return "unavailable";
   }
+  return isAvailability(answer) ? answer : "unavailable";
 }
 
 /** A `monitor` that reports download progress (0..1) to `onProgress`. */

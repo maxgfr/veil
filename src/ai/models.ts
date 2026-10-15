@@ -22,14 +22,11 @@ import {
 } from "./device";
 // The installed WebLLM's models, extracted at build time (scripts/engine-models.ts).
 import { ENGINE_MODELS, type EngineModel } from "./engineModels";
-import { isAudioModel } from "./modelIds";
 
 /** Meeting notes ask for structured output, in the meeting's language. */
 export const LOCAL_NEEDS: readonly BrowserModelNeed[] = ["json", "multilingual"];
 /** Other choices shown besides the recommended one. */
 export const MAX_ALTERNATIVES = 3;
-
-export { isAudioModel };
 
 export interface ModelChoice {
   id: string;
@@ -159,20 +156,4 @@ export function recommendLocal(
 function shortReason(m: BrowserModel): string {
   const size = formatGb(downloadBytesOf(m) ?? 0);
   return `${modelLabel(m.id)} needs ${Math.ceil(m.vram_required_mb)} MB of GPU memory and a ${size} download.`;
-}
-
-/**
- * The audio model (Gemma 4 E2B) this device can run and download, by the same
- * rules as `recommendLocal`; null when no build of it fits.
- */
-export function audioModelFit(
-  device: DeviceInfo,
-  catalog: readonly BrowserModel[] = listBrowserModels(),
-  engine: readonly EngineModel[] = ENGINE_MODELS,
-): ModelChoice | null {
-  return recommendLocal(
-    device,
-    catalog.filter((m) => isAudioModel(m.id)),
-    engine,
-  ).fits;
 }

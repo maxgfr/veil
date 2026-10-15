@@ -85,6 +85,12 @@ member.
   downloads only: the model runs in a worker on the device, and no prompt,
   transcript or message is ever sent anywhere. WebLLM is bundled into that
   worker alone (the build checks it), never into the page.
+- Speech recognition, when the browser can't do it on the device, runs Whisper
+  (transformers.js on ONNX Runtime Web) in its own worker, the only bundle that
+  carries them. ONNX Runtime's WebAssembly is served by Veil itself, never by
+  its default CDN (the build checks it); the worker's requests are limited to
+  `https://huggingface.co` and `https://*.hf.co`, for the weights, and only
+  during a download you clicked. The audio never leaves the device.
 - No inline script or style, no third-party script, font, CDN or analytics.
   The build fails if the page has an inline script or an external URL.
 - `no-referrer`, and the app refuses to run inside a frame (clickjacking),
