@@ -33,6 +33,7 @@ const PATHS = {
   alert: "M12 4l9 16H3z M12 10v4 M12 17h.01",
   wifi: "M2 9a15 15 0 0 1 20 0 M5.5 12.5a10 10 0 0 1 13 0 M9 16a5 5 0 0 1 6 0 M12 19.5h.01",
   hand: "M12 12h.01",
+  record: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
 } as const;
 
 export type IconName = keyof typeof PATHS;

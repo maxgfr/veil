@@ -1511,6 +1511,61 @@ textarea.input {
   grid-column: 2;
 }
 
+/* ── recording ────────────────────────────────────────────────────────── */
+.chip-rec {
+  background: var(--danger);
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+
+.rec-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rec-dot {
+    animation: rec-blink 1.6s var(--ease) infinite;
+  }
+}
+
+@keyframes rec-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.recording-files {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recording-files li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+}
+
+.recording-file {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.recording-file .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .scanner {
   display: flex;
   flex-direction: column;

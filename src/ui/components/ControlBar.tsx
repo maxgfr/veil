@@ -36,11 +36,14 @@ export function ControlBar(props: {
   mode: RoomMode;
   side: SidePanel;
   onSide: (side: SidePanel) => void;
+  onRecord: () => void;
   onLeave: () => void;
 }): JSX.Element {
   const s = props.session;
   const m = s.media;
   const canScreen = typeof navigator.mediaDevices?.getDisplayMedia === "function";
+  const canRecord = typeof MediaRecorder !== "undefined";
+  const recording = s.recording.value !== "idle";
   const input = useRef<HTMLInputElement>(null);
   const toggle = (panel: Exclude<SidePanel, null>) =>
     props.onSide(props.side === panel ? null : panel);
@@ -71,6 +74,16 @@ export function ControlBar(props: {
               pressed={m.screenOn}
               tone={m.screenOn ? "on" : undefined}
               onClick={() => void s.toggleScreen()}
+            />
+          )}
+          {canRecord && (
+            <Control
+              icon="record"
+              label={recording ? "Stop recording" : "Start recording"}
+              pressed={recording}
+              tone={recording ? "danger" : undefined}
+              onClick={props.onRecord}
+              testid="toggle-record"
             />
           )}
           <Control
