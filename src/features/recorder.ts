@@ -8,7 +8,6 @@
  *    whenever the set of tracks changes.
  *  - Two MediaRecorders run on that mix: video + audio, and audio only. Their
  *    chunks go to sinks (the same ones file transfers use), in order.
- *  - Captions are collected and written as a plain-text transcript on stop.
  *
  * Only type imports here: this module lives in the lazy session chunk.
  */
@@ -81,7 +80,7 @@ export function pickMime(
   return (kind === "video" ? VIDEO_MIMES : AUDIO_MIMES).find((m) => isTypeSupported(m)) ?? null;
 }
 
-export type RecordingPart = "video" | "audio" | "transcript";
+export type RecordingPart = "video" | "audio";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -94,30 +93,7 @@ export function recordingNames(date: Date, part: RecordingPart, mime = ""): stri
       : mime.startsWith("audio/ogg")
         ? "ogg"
         : "webm";
-  if (part === "video") return `${base}.${ext}`;
-  if (part === "audio") return `${base}.audio.${ext}`;
-  return `${base}.txt`;
-}
-
-export interface CaptionLine {
-  nick: string;
-  ts: number;
-  /** null when the speaker's device cannot transcribe. */
-  text: string | null;
-  /** The speaker's language (BCP 47), when their device said. */
-  lang?: string;
-}
-
-/** `[hh:mm:ss] Nick: text`, elapsed since `start`; notices carry no time. */
-export function formatTranscript(start: number, lines: CaptionLine[]): string {
-  return lines
-    .map((l) => {
-      if (l.text === null) return `${l.nick}: transcription unavailable on this device`;
-      const s = Math.max(0, Math.floor((l.ts - start) / 1000));
-      return `[${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}] ${l.nick}: ${l.text}`;
-    })
-    .map((l) => `${l}\n`)
-    .join("");
+  return part === "video" ? `${base}.${ext}` : `${base}.audio.${ext}`;
 }
 
 export function initials(nick: string): string {
@@ -144,7 +120,6 @@ export interface RecorderDeps {
 export interface RecordingUrls {
   video: string | null;
   audio: string | null;
-  transcript: string | null;
 }
 
 /** One MediaRecorder writing into one sink, chunk after chunk. */
@@ -198,7 +173,6 @@ export class Recorder {
   private timer: ReturnType<typeof setInterval> | null = null;
   private tracks: { video: Track | null; audio: Track | null } = { video: null, audio: null };
   private captured: MediaStream | null = null;
-  private captions: CaptionLine[] = [];
   private urls: string[] = [];
   private stopping: Promise<RecordingUrls> | null = null;
 
@@ -253,15 +227,6 @@ export class Recorder {
     const track = new Track(rec, sink);
     rec.start(TIMESLICE);
     return track;
-  }
-
-  addCaption(nick: string, ts: number, text: string | null, lang?: string): void {
-    this.captions.push(lang ? { nick, ts, text, lang } : { nick, ts, text });
-  }
-
-  /** The transcript so far (a copy). */
-  lines(): CaptionLine[] {
-    return this.captions.map((l) => ({ ...l }));
   }
 
   private tick(): void {
@@ -373,31 +338,9 @@ export class Recorder {
       this.tracks.video?.finish() ?? null,
       this.tracks.audio?.finish() ?? null,
     ]);
-    const transcript = await this.writeTranscript();
-    for (const url of [video, audio, transcript]) if (url) this.urls.push(url);
+    for (const url of [video, audio]) if (url) this.urls.push(url);
     this.release();
-    return { video, audio, transcript };
-  }
-
-  private async writeTranscript(): Promise<string | null> {
-    if (this.captions.length === 0) return null;
-    const data = new TextEncoder().encode(formatTranscript(this.started, this.captions)) as Bytes;
-    const name = recordingNames(new Date(this.started), "transcript");
-    const sink = await this.deps.sink({
-      id: crypto.randomUUID(),
-      name,
-      size: data.length,
-      mime: "text/plain",
-    });
-    if (!sink) return null;
-    try {
-      await sink.write(data);
-    } catch (err) {
-      await sink.abort();
-      console.warn("transcript failed", err);
-      return null;
-    }
-    return sink.close();
+    return { video, audio };
   }
 
   /** Releases everything; URLs returned by stop() stop working. */

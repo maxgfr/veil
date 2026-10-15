@@ -31,14 +31,9 @@ export function baseLang(tag: string): string {
   return tag.split("-")[0]?.toLowerCase() ?? tag;
 }
 
-/** The full tag speech is recognized in, such as "fr-FR". */
-export function speechLang(): string {
-  return settings.value.language || navigator.language || "en-US";
-}
-
-/** The base language translations land in, such as "fr". */
+/** The base language translations land in, such as "fr": the one picked, else the browser's. */
 export function myLang(): string {
-  return baseLang(speechLang());
+  return baseLang(settings.value.language || navigator.language || "en-US");
 }
 
 /** "fr-FR" → "French (France)"; an odd tag is shown as is. */

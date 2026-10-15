@@ -1988,92 +1988,6 @@ select.input:disabled:hover {
   min-width: 0;
 }
 
-/* ── live captions ────────────────────────────────────────────────────── */
-.chip-cc {
-  background: oklch(1 0 0 / 0.16);
-  color: var(--on-stage);
-  letter-spacing: 0.04em;
-}
-
-.live-captions {
-  position: absolute;
-  /* Above the tiles' name labels, which sit on their bottom edge. */
-  inset: auto 12px 56px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  pointer-events: none;
-}
-
-.live-caption {
-  max-width: min(720px, 100%);
-  margin: 0;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background: oklch(0 0 0 / 0.72);
-  color: #fff;
-  font-size: 15px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
-.live-caption-nick {
-  font-weight: 700;
-}
-
-.live-caption-note {
-  color: oklch(0.8 0.01 255);
-  font-size: 12px;
-}
-
-/* What the captions are doing: stays put, unlike the lines that fade. */
-.live-caption-status {
-  max-width: min(720px, 100%);
-  margin: 0;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background: oklch(0 0 0 / 0.6);
-  color: oklch(0.88 0.01 255);
-  font-size: 13px;
-  line-height: 1.4;
-  text-align: center;
-  overflow-wrap: anywhere;
-}
-
-.live-caption-action {
-  pointer-events: auto;
-  min-height: 24px;
-  padding: 0 2px;
-  border: 0;
-  background: none;
-  color: #fff;
-  font: inherit;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .live-caption {
-    animation: caption-fade 6s var(--ease) both;
-  }
-}
-
-@keyframes caption-fade {
-  0% {
-    opacity: 0;
-  }
-  5%,
-  88% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
 /* ── translation ──────────────────────────────────────────────────────── */
 .translate-msg {
   margin: 2px 4px 0;
@@ -2098,29 +2012,6 @@ select.input:disabled:hover {
 .msg:hover .translate-msg.on-hover,
 .msg:focus-within .translate-msg.on-hover {
   opacity: 1;
-}
-
-/* ── meeting notes ────────────────────────────────────────────────────── */
-.recording-files li.recording-ai {
-  flex-wrap: wrap;
-}
-
-.recording-preview {
-  flex-basis: 100%;
-  max-height: 200px;
-  margin: 0;
-  padding: 8px 12px;
-  overflow: auto;
-  border-radius: 12px;
-  background: var(--surface-2);
-  font: inherit;
-  font-size: 13px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.recording-note {
-  flex-basis: 100%;
 }
 
 /* ── scheduled meetings ───────────────────────────────────────────────── */

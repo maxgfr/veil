@@ -162,14 +162,6 @@ export function ControlBar(props: {
             />
           )}
           <Control
-            icon="captions"
-            label={s.captionsOn.value ? "Turn captions off" : "Turn captions on"}
-            pressed={s.captionsOn.value}
-            tone={s.captionsOn.value ? "on" : undefined}
-            onClick={() => s.toggleCaptions()}
-            testid="toggle-captions"
-          />
-          <Control
             icon="file"
             label={props.side === "files" ? "Hide files" : "Show files"}
             pressed={props.side === "files"}

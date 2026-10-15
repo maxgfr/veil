@@ -2,37 +2,9 @@ import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 import { closeSheets, createRoom, joinRoom, member, waitLinks, waitMembers } from "./helpers";
 
-/**
- * No save picker (files go to private storage), and an on-device speech
- * recognizer that hears "hello from ada" shortly after it starts.
- */
-function fakeSpeech(): void {
+/** No save picker: files go to private storage. */
+function noSavePicker(): void {
   delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
-  class FakeRecognition {
-    static available = async () => "available";
-    static install = async () => true;
-    continuous = false;
-    interimResults = false;
-    lang = "";
-    processLocally = false;
-    onresult: ((e: unknown) => void) | null = null;
-    onend: (() => void) | null = null;
-    private timer: ReturnType<typeof setTimeout> | undefined;
-    start(): void {
-      this.timer = setTimeout(() => {
-        const result = Object.assign([{ transcript: "hello from ada" }], { isFinal: true });
-        this.onresult?.({ resultIndex: 0, results: [result] });
-      }, 300);
-    }
-    stop(): void {
-      clearTimeout(this.timer);
-      this.onend?.();
-    }
-    abort(): void {
-      this.stop();
-    }
-  }
-  (window as { SpeechRecognition?: unknown }).SpeechRecognition = FakeRecognition;
 }
 
 async function download(page: Page, testid: string): Promise<Buffer> {
@@ -44,13 +16,13 @@ async function download(page: Page, testid: string): Promise<Buffer> {
   return readFile(path);
 }
 
-test("a recording gives everyone a REC indicator and saves video, audio and a transcript", async ({
+test("a recording gives everyone a REC indicator and saves video and audio", async ({
   browser,
 }) => {
   const a = await member(browser);
   const b = await member(browser);
-  await a.ctx.addInitScript(fakeSpeech);
-  await b.ctx.addInitScript(fakeSpeech);
+  await a.ctx.addInitScript(noSavePicker);
+  await b.ctx.addInitScript(noSavePicker);
   const link = await createRoom(a, "Ada");
   await joinRoom(b, link, "Bob");
   await closeSheets(b.page);
@@ -70,7 +42,7 @@ test("a recording gives everyone a REC indicator and saves video, audio and a tr
   await expect(b.page.getByText("Ada started recording")).toBeVisible();
   await expect(a.page.getByTestId("rec-indicator")).toBeVisible();
 
-  // Let a few chunks and the caption come in.
+  // Let a few chunks come in.
   await a.page.waitForTimeout(3000);
   await a.page.getByTestId("toggle-record").click();
   await expect(a.page.getByTestId("recording-sheet")).toBeVisible();
@@ -81,8 +53,6 @@ test("a recording gives everyone a REC indicator and saves video, audio and a tr
   expect(video.subarray(0, 4).toString("hex")).toBe("1a45dfa3");
   const audio = await download(a.page, "recording-audio");
   expect(audio.length).toBeGreaterThan(0);
-  const transcript = await download(a.page, "recording-transcript");
-  expect(transcript.toString("utf8")).toContain("Ada: hello from ada");
 
   expect(a.errors).toEqual([]);
   expect(b.errors).toEqual([]);
@@ -94,7 +64,7 @@ test("a new recording releases the previous one's files, and the new files still
   browser,
 }) => {
   const a = await member(browser);
-  await a.ctx.addInitScript(fakeSpeech);
+  await a.ctx.addInitScript(noSavePicker);
   await a.ctx.addInitScript(() => {
     const w = window as { revoked?: string[] };
     const revoke = URL.revokeObjectURL.bind(URL);
@@ -137,7 +107,7 @@ test("a new recording releases the previous one's files, and the new files still
 
 test("leaving while the recording is stopping still offers its files", async ({ browser }) => {
   const a = await member(browser);
-  await a.ctx.addInitScript(fakeSpeech);
+  await a.ctx.addInitScript(noSavePicker);
   await createRoom(a, "Ada");
   await closeSheets(a.page);
   await a.page.getByTestId("toggle-cam").click();

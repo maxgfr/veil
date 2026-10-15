@@ -1,6 +1,5 @@
 import type { JSX } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { aiSettingsWanted } from "../../ai/store";
 import type { RoomSession } from "../session";
 import {
   defaultSettings,
@@ -66,12 +65,6 @@ export function SettingsSheet(props: {
   useEffect(() => {
     if (!props.open || AiView) return;
     void import("./AiSettings").then((m) => setAiView({ C: m.AiSettings }));
-  }, [props.open, AiView]);
-
-  useEffect(() => {
-    if (!props.open || !AiView || !aiSettingsWanted.value) return;
-    aiSettingsWanted.value = false;
-    document.getElementById("ai-settings")?.scrollIntoView({ block: "start" });
   }, [props.open, AiView]);
 
   const save = () => {

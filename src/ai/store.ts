@@ -1,13 +1,12 @@
 /**
- * Page-wide state of the browser's built-in AI (Chrome's Summarizer, Translator and
- * LanguageDetector): what is available and what is downloading. The signals outlive the
- * Settings sheet.
+ * Page-wide state of the browser's built-in AI (Chrome's Translator and LanguageDetector):
+ * what is available and what is downloading. The signals outlive the Settings sheet.
  */
 import { signal } from "@preact/signals";
 import { myLang } from "../ui/language";
 import type { Availability } from "./builtin";
 
-export type BuiltinName = "summarizer" | "translator" | "languageDetector";
+export type BuiltinName = "translator" | "languageDetector";
 /** What a built-in model's row shows: its availability, or "unknown" when the probe never answered. */
 export type BuiltinState = Availability | "unknown";
 
@@ -16,16 +15,6 @@ export const aiError = signal<string | null>(null);
 export const aiBuiltin = signal<Readonly<Record<BuiltinName, BuiltinState>> | null>(null);
 /** Download progress (0..1) of built-in models being fetched. */
 export const aiBuiltinProgress = signal<Readonly<Partial<Record<BuiltinName, number>>>>({});
-
-/**
- * Set by `openAiSettings()`: the Settings sheet scrolls to the AI settings
- * the next time it opens, then clears it. The caller still opens the sheet.
- */
-export const aiSettingsWanted = signal(false);
-
-export function openAiSettings(): void {
-  aiSettingsWanted.value = true;
-}
 
 function report(err: unknown): void {
   aiError.value = err instanceof Error ? err.message : String(err);
@@ -60,12 +49,11 @@ export function detectBuiltin(): Promise<void> {
     const { availabilityOf, builtinApis } = await import("./builtin");
     const apis = builtinApis();
     // availabilityOf already maps a rejected probe to "unavailable".
-    const [summarizer, translator, languageDetector] = await Promise.all([
-      bounded(availabilityOf(apis.summarizer, {})),
+    const [translator, languageDetector] = await Promise.all([
       bounded(availabilityOf(apis.translator, probePair())),
       bounded(availabilityOf(apis.languageDetector, {})),
     ]);
-    aiBuiltin.value = { summarizer, translator, languageDetector };
+    aiBuiltin.value = { translator, languageDetector };
   })()
     .catch(report)
     .finally(() => {
@@ -91,11 +79,9 @@ export async function downloadBuiltin(name: BuiltinName): Promise<void> {
   aiBuiltinProgress.value = { ...aiBuiltinProgress.value, [name]: 0 };
   try {
     const session =
-      name === "summarizer"
-        ? await apis.summarizer?.create(common)
-        : name === "translator"
-          ? await apis.translator?.create({ ...probePair(), ...common })
-          : await apis.languageDetector?.create(common);
+      name === "translator"
+        ? await apis.translator?.create({ ...probePair(), ...common })
+        : await apis.languageDetector?.create(common);
     session?.destroy?.();
   } catch (err) {
     report(err);

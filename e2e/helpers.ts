@@ -130,7 +130,6 @@ export async function noHorizontalOverflow(page: Page): Promise<void> {
  */
 export function fakeBuiltinAi(): void {
   const english: Record<string, string> = {
-    "Guten Morgen zusammen": "Good morning everyone",
     "Wie geht es euch heute?": "How are you all today?",
   };
   const german = /\b(guten|morgen|zusammen|wie|geht|euch|heute|und|ist)\b/i;
@@ -152,61 +151,6 @@ export function fakeBuiltinAi(): void {
         : `[${opts.targetLanguage}] ${text}`,
     destroy() {},
   }));
-  w.Summarizer = api(() => ({
-    summarize: async (text: string) => `- The meeting covered ${text.split("\n").length} lines.`,
-    destroy() {},
-  }));
-}
-
-/**
- * Init script: on-device speech recognition that hears `text` shortly after it
- * starts, then again every few seconds; each start's language is logged in
- * `window.heardIn`. No save picker either (files go to private storage).
- */
-export function fakeSpeechSaying(text: string): void {
-  delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
-  class FakeRecognition {
-    static available = async () => "available";
-    static install = async () => true;
-    continuous = false;
-    interimResults = false;
-    lang = "";
-    processLocally = false;
-    onresult: ((e: unknown) => void) | null = null;
-    onend: (() => void) | null = null;
-    private timers: ReturnType<typeof setTimeout>[] = [];
-    start(): void {
-      const w = window as unknown as { heardIn?: string[] };
-      w.heardIn = [...(w.heardIn ?? []), this.lang];
-      const hear = () => {
-        const result = Object.assign([{ transcript: text }], { isFinal: true });
-        this.onresult?.({ resultIndex: 0, results: [result] });
-      };
-      this.timers = [setTimeout(hear, 300), setInterval(hear, 3000)];
-    }
-    stop(): void {
-      for (const t of this.timers) clearTimeout(t);
-      this.onend?.();
-    }
-    abort(): void {
-      this.stop();
-    }
-  }
-  (window as { SpeechRecognition?: unknown }).SpeechRecognition = FakeRecognition;
-}
-
-/** Init script: a browser that can't recognize speech on the device (no Web Speech at all). */
-export function noWebSpeech(): void {
-  const w = window as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
-  delete w.SpeechRecognition;
-  delete w.webkitSpeechRecognition;
-}
-
-/** Init script: merges `patch` into the stored settings (runs after `member`'s own). */
-export function storedSettings(patch: Record<string, unknown>): void {
-  const key = "veil.settings.v1";
-  const s = JSON.parse(localStorage.getItem(key) ?? "{}");
-  localStorage.setItem(key, JSON.stringify({ ...s, ...patch }));
 }
 
 /**

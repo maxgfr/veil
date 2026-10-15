@@ -1,22 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  Availability,
-  BuiltinApis,
-  LanguageDetectorApi,
-  SummarizerApi,
-  TranslatorApi,
-} from "./builtin";
+import type { Availability, BuiltinApis, LanguageDetectorApi, TranslatorApi } from "./builtin";
 import { builtinApis } from "./builtin";
-import {
-  canTranslate,
-  detectLang,
-  type Line,
-  summarizeMeeting,
-  summaryAvailable,
-  type TaskDeps,
-  transcriptIn,
-  translate,
-} from "./tasks";
+import { canTranslate, detectLang, type TaskDeps, translate } from "./tasks";
 
 const detector = (lang: string, confidence = 0.9, avail: Availability = "available") =>
   ({
@@ -34,35 +19,13 @@ const translator = (avail: Availability = "available") =>
     }),
   }) satisfies TranslatorApi;
 
-const summarizer = (avail: Availability = "available", streaming = false): SummarizerApi => ({
-  availability: async () => avail,
-  create: async () => ({
-    summarize: async () => "- point one",
-    ...(streaming
-      ? {
-          async *summarizeStreaming() {
-            yield "- point ";
-            yield "one";
-          },
-        }
-      : {}),
-  }),
-});
-
 const deps = (builtin: BuiltinApis): TaskDeps => ({ builtin });
-
-const lines: Line[] = [
-  { nick: "Ada", ts: 0, text: "Bonjour à tous" },
-  { nick: "Bob", ts: 1000, text: null },
-  { nick: "Bob", ts: 2000, text: "Hello", lang: "en" },
-];
 
 describe("builtinApis", () => {
   test("picks up only usable globals", () => {
-    const scope = { Translator: translator(), Summarizer: { availability: 1 } };
+    const scope = { Translator: translator(), LanguageDetector: { availability: 1 } };
     const apis = builtinApis(scope);
     expect(apis.translator).toBe(scope.Translator);
-    expect(apis.summarizer).toBeUndefined();
     expect(apis.languageDetector).toBeUndefined();
     expect(builtinApis({})).toEqual({});
   });
@@ -116,51 +79,5 @@ describe("canTranslate", () => {
     expect(await canTranslate("fr", "en", deps({ translator: translator("unavailable") }))).toBe(
       false,
     );
-  });
-});
-
-describe("transcriptIn", () => {
-  test("translates the lines in another language", async () => {
-    const d = deps({ translator: translator(), languageDetector: detector("fr") });
-    expect(await transcriptIn(lines, "en", d)).toEqual([
-      { nick: "Ada", ts: 0, text: "[en] Bonjour à tous", lang: "en" },
-      { nick: "Bob", ts: 1000, text: null },
-      { nick: "Bob", ts: 2000, text: "Hello", lang: "en" },
-    ]);
-  });
-
-  test("null without a translator", async () => {
-    expect(await transcriptIn(lines, "en", deps({}))).toBeNull();
-  });
-});
-
-describe("summaryAvailable", () => {
-  test("a usable Summarizer", async () => {
-    expect(await summaryAvailable(deps({ summarizer: summarizer("downloadable") }))).toBe(true);
-    expect(await summaryAvailable(deps({ summarizer: summarizer("unavailable") }))).toBe(false);
-    expect(await summaryAvailable(deps({}))).toBe(false);
-  });
-});
-
-describe("summarizeMeeting", () => {
-  test("the Summarizer gives key points, streamed or not", async () => {
-    const partials: string[] = [];
-    const out = await summarizeMeeting(
-      lines,
-      "en",
-      { onPartial: (m) => partials.push(m) },
-      deps({ summarizer: summarizer("available", true) }),
-    );
-    expect(out).toEqual({ markdown: "## Summary\n\n- point one\n" });
-    expect(partials).toContain("## Summary\n\n- point ");
-    expect(partials.at(-1)).toBe(out?.markdown ?? "");
-    const plain = await summarizeMeeting(lines, "en", {}, deps({ summarizer: summarizer() }));
-    expect(plain?.markdown).toContain("- point one");
-  });
-
-  test("null when nothing can summarize", async () => {
-    expect(await summarizeMeeting(lines, "en", {}, deps({}))).toBeNull();
-    const d = deps({ summarizer: summarizer("unavailable") });
-    expect(await summarizeMeeting(lines, "en", {}, d)).toBeNull();
   });
 });
