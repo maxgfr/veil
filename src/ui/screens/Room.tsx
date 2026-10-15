@@ -2,6 +2,7 @@ import type { JSX } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { RoomMode } from "../../crypto/room";
 import { ChatPanel } from "../components/ChatPanel";
+import { ConnectionSheet } from "../components/ConnectionSheet";
 import { ControlBar, type SidePanel } from "../components/ControlBar";
 import { FilesPanel } from "../components/FilesPanel";
 import { hueOf, initials } from "../components/format";
@@ -12,15 +13,8 @@ import { Sheet } from "../components/Sheet";
 import { Toasts } from "../components/Toast";
 import { VerifySheet } from "../components/VerifySheet";
 import { VideoGrid } from "../components/VideoGrid";
+import { browserOnline, connectionSummary, LINK_LABEL } from "../connection";
 import type { MemberView, RoomSession } from "../session";
-
-const LINK_LABEL: Record<string, string> = {
-  connecting: "Connecting",
-  securing: "Securing",
-  connected: "Direct",
-  reconnecting: "Reconnecting",
-  closed: "Disconnected",
-};
 
 function wideScreen(): boolean {
   return typeof matchMedia === "function" && matchMedia("(min-width: 900px)").matches;
@@ -39,6 +33,7 @@ export function Room(props: {
   const [side, setSide] = useState<SidePanel>(() => (!files && wideScreen() ? "chat" : null));
   const [share, setShare] = useState(false);
   const [people, setPeople] = useState(false);
+  const [connection, setConnection] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [verify, setVerify] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -47,7 +42,9 @@ export function Room(props: {
   const others = members.filter((m) => !m.self);
   // A files room never shows the call stage, even if someone else has a camera on.
   const inCall = !files && members.some((m) => m.media.audio || m.media.video || m.media.screen);
-  const connected = others.some((m) => m.link === "connected" || m.link === "reconnecting");
+  const netOnline = browserOnline.value;
+  const summary = connectionSummary({ online: netOnline, transports: s.transports, others });
+  const count = others.length === 0 ? "Waiting for others" : `${others.length + 1} in the room`;
   const online = s.transports.filter((t) => t.state === "online").map((t) => t.name);
   const e2eeMedia = inCall && s.mediaE2ee();
 
@@ -113,13 +110,18 @@ export function Room(props: {
           <span class="room-badge" role="img" aria-label={`Room ${s.badgeNames.join(", ")}`}>
             {s.badge.join("")}
           </span>
-          <button type="button" class="status" onClick={() => setPeople(true)} data-testid="status">
-            <span
-              class={`dot${connected ? " dot-ok" : online.length ? " dot-wait" : " dot-bad"}`}
-              aria-hidden="true"
-            />
+          <button
+            type="button"
+            class="status"
+            onClick={() => setConnection(true)}
+            aria-label={`${count} · ${summary.label}`}
+            data-state={summary.tone}
+            data-testid="status"
+          >
+            <span class={`dot dot-${summary.tone}`} aria-hidden="true" />
             <span class="tabular">
-              {others.length === 0 ? "Waiting for others" : `${others.length + 1} in the room`}
+              {count}
+              <span class="hide-sm"> · {summary.label}</span>
             </span>
           </button>
           {files && (
@@ -171,14 +173,25 @@ export function Room(props: {
         </div>
       </header>
 
-      {s.connectivityHint && (
-        <div class="banner banner-warn" role="status">
-          <Icon name="alert" size={18} />
-          <span>{s.connectivityHint}</span>
-          <button type="button" class="btn btn-ghost btn-sm" onClick={() => setSettingsOpen(true)}>
-            Settings
-          </button>
+      {!netOnline ? (
+        <div class="banner banner-bad" role="status" data-testid="offline">
+          <Icon name="wifi" size={18} />
+          <span>You're offline. The room reconnects when the network comes back.</span>
         </div>
+      ) : (
+        s.connectivityHint && (
+          <div class="banner banner-warn" role="status">
+            <Icon name="alert" size={18} />
+            <span>{s.connectivityHint}</span>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              onClick={() => setSettingsOpen(true)}
+            >
+              Settings
+            </button>
+          </div>
+        )
       )}
 
       <main class="stage">
@@ -268,90 +281,61 @@ export function Room(props: {
       <Sheet open={people} onClose={() => setPeople(false)} title="People" testid="people-sheet">
         <PeopleList
           members={members}
-          session={s}
           onVerify={(id) => {
             setPeople(false);
             setVerify(id);
           }}
         />
       </Sheet>
+      <ConnectionSheet
+        open={connection}
+        onClose={() => setConnection(false)}
+        session={s}
+        others={others}
+        online={netOnline}
+        summary={summary}
+      />
       <Toasts toasts={s.toasts} />
     </div>
   );
 }
 
-function PeopleList(props: {
-  members: MemberView[];
-  session: RoomSession;
-  onVerify: (id: string) => void;
-}): JSX.Element {
-  const s = props.session;
+function PeopleList(props: { members: MemberView[]; onVerify: (id: string) => void }): JSX.Element {
   return (
-    <div class="stack">
-      <ul class="people">
-        {props.members.map((m) => (
-          <li key={m.peerId} class="person" data-testid="person">
-            <span class="avatar" style={{ "--hue": String(hueOf(m.peerId)) }} aria-hidden="true">
-              {initials(m.nick)}
+    <ul class="people">
+      {props.members.map((m) => (
+        <li key={m.peerId} class="person" data-testid="person">
+          <span class="avatar" style={{ "--hue": String(hueOf(m.peerId)) }} aria-hidden="true">
+            {initials(m.nick)}
+          </span>
+          <span class="person-main">
+            <span class="person-name">
+              {m.nick}
+              {m.self && <span class="muted"> (you)</span>}
             </span>
-            <span class="person-main">
-              <span class="person-name">
-                {m.nick}
-                {m.self && <span class="muted"> (you)</span>}
-              </span>
-              <span class="person-meta">
-                {m.self
-                  ? "This device"
-                  : m.blocked
-                    ? "Verification failed · disconnected"
-                    : m.link
-                      ? `${LINK_LABEL[m.link] ?? m.link}${m.rtt !== null && m.link === "connected" ? ` · ${m.rtt} ms` : ""}${m.relayed ? " · via TURN" : ""}`
-                      : "Reached through the mesh"}
-              </span>
+            <span class="person-meta">
+              {m.self
+                ? "This device"
+                : m.blocked
+                  ? "Verification failed · disconnected"
+                  : m.link
+                    ? `${LINK_LABEL[m.link] ?? m.link}${m.rtt !== null && m.link === "connected" ? ` · ${m.rtt} ms` : ""}${m.relayed ? " · via TURN" : ""}`
+                    : "Reached through the mesh"}
             </span>
-            {!m.self && m.link === "connected" && (
-              <button
-                type="button"
-                class={`btn btn-sm ${m.verified ? "btn-verified" : "btn-secondary"}`}
-                onClick={() => props.onVerify(m.peerId)}
-                data-testid="verify"
-              >
-                <Icon name={m.verified ? "check" : "shield"} size={16} />
-                {m.verified ? "Verified" : "Verify"}
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-      <fieldset class="group">
-        <legend>Rendezvous</legend>
-        <ul class="transports">
-          {s.transports.map((t) => (
-            <li key={t.name}>
-              <span
-                class={`dot dot-${t.state === "online" ? "ok" : t.state === "connecting" ? "wait" : "bad"}`}
-                aria-hidden="true"
-              />
-              <span>
-                {t.name === "nostr"
-                  ? "Nostr relays"
-                  : t.name === "torrent"
-                    ? "WebTorrent trackers"
-                    : "Manual codes"}
-              </span>
-              <span class="muted small">
-                {t.endpoints.length
-                  ? `${t.endpoints.filter((e) => e.state === "online").length}/${t.endpoints.length} online`
-                  : t.state}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p class="muted small">
-          Only used to bootstrap. Once connected, new members are introduced through the encrypted
-          mesh.
-        </p>
-      </fieldset>
-    </div>
+          </span>
+          {!m.self && m.link === "connected" && (
+            <button
+              type="button"
+              class={`btn btn-sm ${m.verified ? "btn-verified" : "btn-secondary"}`}
+              onClick={() => props.onVerify(m.peerId)}
+              data-testid="verify"
+            >
+              <Icon name={m.verified ? "check" : "shield"} size={16} />
+              {m.verified ? "Verified" : "Verify"}
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

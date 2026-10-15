@@ -8,7 +8,9 @@ import {
   type RoomMode,
   roomFragment,
 } from "../crypto/room";
+import { Icon } from "./components/Icons";
 import { SettingsSheet } from "./components/SettingsSheet";
+import { browserOnline } from "./connection";
 import { applyUpdate, updateReady } from "./pwa";
 import { Home } from "./screens/Home";
 import { Lobby, type LobbyChoice } from "./screens/Lobby";
@@ -140,14 +142,22 @@ export function App(): JSX.Element {
 
   return (
     <>
-      {updateReady.value && route.name !== "room" && (
-        <div class="update" role="status">
-          <span>A new version of Veil is available.</span>
-          <button type="button" class="btn btn-sm btn-primary" onClick={applyUpdate}>
-            Reload
-          </button>
-        </div>
-      )}
+      {route.name !== "room" &&
+        (!browserOnline.value ? (
+          <div class="update offline" role="status" data-testid="offline">
+            <Icon name="wifi" size={18} />
+            <span>You're offline. Rooms need a network to connect.</span>
+          </div>
+        ) : (
+          updateReady.value && (
+            <div class="update" role="status">
+              <span>A new version of Veil is available.</span>
+              <button type="button" class="btn btn-sm btn-primary" onClick={applyUpdate}>
+                Reload
+              </button>
+            </div>
+          )
+        ))}
       {screen}
       {route.name === "home" && (
         <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} inRoom={false} />
