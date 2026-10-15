@@ -325,6 +325,44 @@ textarea.input {
   line-height: 1.4;
 }
 
+/* A select is a field with a chevron, drawn from the theme so it follows dark mode. */
+select.input {
+  appearance: none;
+  padding-right: 40px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) 50%,
+    calc(100% - 15px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+  transition-property: border-color, box-shadow, background-color;
+}
+
+select.input:hover {
+  border-color: var(--muted);
+  background-color: var(--surface-2);
+}
+
+select.input:focus {
+  background-color: var(--surface);
+}
+
+select.input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+select.input:disabled:hover {
+  border-color: var(--line-strong);
+  background-color: var(--surface);
+}
+
 .code-box {
   font-size: 12px;
   word-break: break-all;
@@ -927,20 +965,6 @@ textarea.input {
   50% {
     box-shadow: 0 0 0 14px oklch(0.74 0.115 178 / 0);
   }
-}
-
-.avatars {
-  display: flex;
-  margin: 0 0 8px;
-  padding: 0;
-  list-style: none;
-}
-
-.avatars .avatar {
-  width: 44px;
-  height: 44px;
-  margin-left: -8px;
-  box-shadow: 0 0 0 3px var(--stage);
 }
 
 .grid {

@@ -55,6 +55,7 @@ export function LiveCaptions(props: {
   const selfOut = s.media.micOn && unavailable.has(s.peerId);
   const othersOut = [...unavailable].filter((id) => id !== s.peerId && s.room.members.has(id));
   const spoken = languageName(speechLang());
+  const installing = s.media.micOn && s.captionsInstalling.value && !selfOut;
   return (
     <div class="live-captions" aria-live="polite" data-testid="live-captions">
       {selfOut && (
@@ -70,7 +71,13 @@ export function LiveCaptions(props: {
           {s.nickOf(id)}'s browser can't caption their speech.
         </p>
       ))}
-      {shown.length === 0 && !selfOut && (
+      {installing && (
+        <p class="live-caption-status" data-testid="captions-installing">
+          Getting {spoken} speech recognition ready on this device. What you say is captioned once
+          it is.
+        </p>
+      )}
+      {shown.length === 0 && !selfOut && !installing && (
         <p class="live-caption-status" data-testid="captions-listening">
           Captions on, in {spoken}.{" "}
           <button type="button" class="live-caption-action" onClick={props.onSettings}>

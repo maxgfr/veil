@@ -237,6 +237,31 @@ test("captions use the language picked in Settings, and a new pick restarts them
   await a.ctx.close();
 });
 
+test("while the browser downloads speech recognition, captions say they are getting ready", async ({
+  browser,
+}) => {
+  const a = await member(browser, {}, { locale: "en-US" });
+  await a.ctx.addInitScript(fakeSpeechSaying, "hello");
+  // The language pack is still downloading: install() doesn't settle.
+  await a.ctx.addInitScript(() => {
+    const R = (window as unknown as { SpeechRecognition: Record<string, unknown> })
+      .SpeechRecognition;
+    R.available = async () => "downloading";
+    R.install = () => new Promise(() => {});
+  });
+  await createRoom(a, "Ada");
+  await a.page.getByTestId("toggle-mic").click();
+  await a.page.getByTestId("toggle-captions").click();
+
+  await expect(a.page.getByTestId("captions-installing")).toContainText(
+    "Getting American English speech recognition ready",
+  );
+  await expect(a.page.getByTestId("captions-listening")).toHaveCount(0);
+
+  expect(a.errors).toEqual([]);
+  await a.ctx.close();
+});
+
 test("without on-device speech recognition, captions say so on both sides", async ({ browser }) => {
   const a = await member(browser, {}, { locale: "en-US" });
   const b = await member(browser, {}, { locale: "de-DE" });

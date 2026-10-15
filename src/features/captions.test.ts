@@ -112,6 +112,19 @@ describe("transcriber", () => {
     expect(sent).toEqual([]);
   });
 
+  test("says while it installs, and when it is done", async () => {
+    const { Recognition } = fake({ status: "downloading", install: true });
+    const installing: boolean[] = [];
+    const t = new Transcriber({
+      Recognition,
+      lang: "fr-FR",
+      send: () => {},
+      onInstalling: (v) => installing.push(v),
+    });
+    await t.start();
+    expect(installing).toEqual([true, false]);
+  });
+
   test("a failed install reports unavailable", async () => {
     const { Recognition, instances } = fake({ status: "downloadable", install: false });
     const { t, sent } = setup(Recognition);
