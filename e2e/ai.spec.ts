@@ -89,6 +89,15 @@ test("a chat message in German can be translated and shown in the original again
   // Our own messages offer nothing.
   await expect(b.page.getByTestId("translate-msg")).toHaveCount(0);
 
+  // Another language picked: the English translation is stale, a new one is made.
+  await a.page.getByRole("button", { name: "Settings", exact: true }).click();
+  await a.page.getByTestId("language-select").selectOption("fr-FR");
+  await a.page.keyboard.press("Escape");
+  await expect(action).toHaveText("Translate");
+  await action.click();
+  await expect(msg.locator(".bubble")).toHaveText("[fr] Wie geht es euch heute?");
+  await expect(msg.locator(".bubble")).toHaveAttribute("lang", "fr");
+
   expect(a.errors).toEqual([]);
   expect(b.errors).toEqual([]);
   await a.ctx.close();
