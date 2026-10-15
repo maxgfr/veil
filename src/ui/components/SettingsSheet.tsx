@@ -1,5 +1,6 @@
 import type { JSX } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { aiSettingsWanted } from "../../ai/store";
 import type { RoomSession } from "../session";
 import {
   defaultSettings,
@@ -12,7 +13,9 @@ import {
 import { DeviceSettings } from "./DeviceSettings";
 import { Sheet } from "./Sheet";
 
-function Toggle(props: {
+type AiSettingsView = typeof import("./AiSettings").AiSettings;
+
+export function Toggle(props: {
   label: string;
   hint: string;
   checked: boolean;
@@ -48,6 +51,8 @@ export function SettingsSheet(props: {
   const [relays, setRelays] = useState("");
   const [trackers, setTrackers] = useState("");
   const [stun, setStun] = useState("");
+  // Lazy: the model catalog and the detection only load once Settings is shown.
+  const [AiView, setAiView] = useState<{ C: AiSettingsView } | null>(null);
 
   useEffect(() => {
     if (!props.open) return;
@@ -58,12 +63,24 @@ export function SettingsSheet(props: {
     setStun(s.stun.join("\n"));
   }, [props.open]);
 
+  useEffect(() => {
+    if (!props.open || AiView) return;
+    void import("./AiSettings").then((m) => setAiView({ C: m.AiSettings }));
+  }, [props.open, AiView]);
+
+  useEffect(() => {
+    if (!props.open || !AiView || !aiSettingsWanted.value) return;
+    aiSettingsWanted.value = false;
+    document.getElementById("ai-settings")?.scrollIntoView({ block: "start" });
+  }, [props.open, AiView]);
+
   const save = () => {
     saveSettings({
       ...draft,
       // Devices are saved as soon as they are picked: never overwrite them with the draft.
       audioDevice: settings.value.audioDevice,
       videoDevice: settings.value.videoDevice,
+      ai: settings.value.ai,
       nostr: { ...draft.nostr, relays: parseUrlList(relays, ["wss://", "ws://"]) },
       torrent: { ...draft.torrent, trackers: parseUrlList(trackers, ["wss://", "ws://"]) },
       stun: parseUrlList(stun, ["stun:", "stuns:"]),
@@ -101,6 +118,8 @@ export function SettingsSheet(props: {
         </label>
 
         <DeviceSettings open={props.open} session={props.session} />
+
+        {AiView && <AiView.C />}
 
         <fieldset class="group">
           <legend>How peers find each other</legend>

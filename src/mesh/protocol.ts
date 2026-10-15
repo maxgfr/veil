@@ -111,6 +111,8 @@ export interface MediaState {
   screen: boolean;
   /** The author is recording the call locally. */
   recording?: boolean;
+  /** The author has live captions on (everyone shows a CC badge). */
+  captions?: boolean;
 }
 
 /** Presence body (plaintext inside the mesh; every hop is pairwise-encrypted). */
@@ -126,6 +128,11 @@ export interface Presence {
   e2ee?: boolean;
   /** The author's current sender key id: members missing it ask again (heals partitions). */
   keyId?: number;
+}
+
+/** A BCP-47-shaped language tag ("en", "pt-BR"), at most 35 characters. */
+function isLangTag(v: unknown): v is string {
+  return typeof v === "string" && v.length <= 35 && /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/.test(v);
 }
 
 export function decodePresence(x: unknown): Presence | null {
@@ -150,6 +157,10 @@ export function decodePresence(x: unknown): Presence | null {
   if (m.recording !== undefined) {
     if (typeof m.recording !== "boolean") return null;
     out.media.recording = m.recording;
+  }
+  if (m.captions !== undefined) {
+    if (typeof m.captions !== "boolean") return null;
+    out.media.captions = m.captions;
   }
   if (x.keyId !== undefined) {
     if (!isInt(x.keyId, 0, 0xffffffff)) return null;
@@ -223,7 +234,7 @@ export type AppMessage =
   | { type: "file-offer"; id: string; name: string; size: number; mime: string }
   | { type: "file-cancel"; id: string }
   /** A live caption line; `unavailable` says the author cannot caption (text is then empty). */
-  | { type: "caption"; ts: number; text: string; unavailable?: true };
+  | { type: "caption"; ts: number; text: string; lang?: string; unavailable?: true };
 
 export const MAX_CHAT_LENGTH = 8000;
 export const MAX_CAPTION_LENGTH = 500;
@@ -249,11 +260,13 @@ export function decodeApp(x: unknown): AppMessage | null {
       return isId(x.id) ? { type: "file-cancel", id: x.id } : null;
     case "caption": {
       if (!isInt(x.ts) || !isStr(x.text, MAX_CAPTION_LENGTH)) return null;
+      if (x.lang !== undefined && !isLangTag(x.lang)) return null;
+      const lang = x.lang === undefined ? {} : { lang: x.lang };
       if (x.unavailable === undefined) {
-        return x.text.length > 0 ? { type: "caption", ts: x.ts, text: x.text } : null;
+        return x.text.length > 0 ? { type: "caption", ts: x.ts, text: x.text, ...lang } : null;
       }
       return x.unavailable === true
-        ? { type: "caption", ts: x.ts, text: x.text, unavailable: true }
+        ? { type: "caption", ts: x.ts, text: x.text, ...lang, unavailable: true }
         : null;
     }
     default:

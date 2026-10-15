@@ -1,5 +1,6 @@
 import type { JSX } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { openAiSettings } from "../../ai/store";
 import type { RoomMode } from "../../crypto/room";
 import { ChatPanel } from "../components/ChatPanel";
 import { ConnectionSheet } from "../components/ConnectionSheet";
@@ -7,6 +8,7 @@ import { ControlBar, type SidePanel } from "../components/ControlBar";
 import { FilesPanel } from "../components/FilesPanel";
 import { hueOf, initials } from "../components/format";
 import { Icon } from "../components/Icons";
+import { LiveCaptions } from "../components/LiveCaptions";
 import { RecordingSheet } from "../components/RecordingSheet";
 import { SettingsSheet } from "../components/SettingsSheet";
 import { ShareSheet } from "../components/ShareSheet";
@@ -57,19 +59,24 @@ export function Room(props: {
   const online = s.transports.filter((t) => t.state === "online").map((t) => t.name);
   const e2eeMedia = inCall && s.mediaE2ee();
   const recorders = members.filter((m) => m.media.recording).map((m) => m.nick);
+  const captioners = files ? [] : members.filter((m) => m.media.captions).map((m) => m.nick);
 
   const toggleRecording = async () => {
-    if (s.recording.value === "idle") return s.startRecording();
+    if (s.recording.value === "idle") {
+      return s.startRecording();
+    }
     const done = await s.stopRecording();
-    if (done) setRecordingFiles(done);
+    if (done) showRecording(done);
   };
+
+  const showRecording = (done: RecordingFiles) => setRecordingFiles(done);
 
   // Leaving while recording stops it first and offers the files before going.
   const leave = async () => {
     if (s.recording.value !== "idle") {
       const done = await s.stopRecording();
       if (done) {
-        setRecordingFiles(done);
+        showRecording(done);
         setLeaveAfterRecording(true);
         return;
       }
@@ -172,6 +179,18 @@ export function Room(props: {
             >
               <span class="rec-dot" aria-hidden="true" />
               REC
+            </span>
+          )}
+          {captioners.length > 0 && (
+            <span
+              class="chip chip-cc"
+              role="img"
+              aria-label={`Captions on for ${joinNames(captioners)}`}
+              title={`Captions on for ${joinNames(captioners)}`}
+              data-testid="captions-indicator"
+            >
+              <Icon name="captions" size={14} />
+              CC
             </span>
           )}
           {e2eeMedia && (
@@ -281,6 +300,7 @@ export function Room(props: {
             )}
           </div>
         )}
+        {!files && <LiveCaptions session={s} />}
       </main>
 
       <aside class="side" aria-hidden={!side}>
@@ -339,6 +359,11 @@ export function Room(props: {
       />
       <RecordingSheet
         files={recordingFiles}
+        lines={recordingFiles?.lines ?? []}
+        onSetupAi={() => {
+          openAiSettings();
+          setSettingsOpen(true);
+        }}
         onClose={() => {
           setRecordingFiles(null);
           setLeaveAfterRecording(false);

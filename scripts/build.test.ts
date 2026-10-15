@@ -23,9 +23,28 @@ describe("build output", () => {
     const html = read("index.html");
     expect(html).toContain(`<meta http-equiv="Content-Security-Policy" content="${CSP}" />`);
     expect(CSP).toContain("default-src 'none'");
-    expect(CSP).toContain("script-src 'self'");
     expect(CSP).toContain("require-trusted-types-for 'script'");
-    expect(CSP).not.toContain("unsafe");
+    // The only relaxation is WebAssembly compilation for the on-device model, and the
+    // only remote hosts are where its weights and library are downloaded from.
+    expect(CSP.split("; ")).toEqual([
+      "default-src 'none'",
+      "script-src 'self' 'wasm-unsafe-eval'",
+      "style-src 'self'",
+      "connect-src 'self' wss: https://huggingface.co https://*.hf.co https://raw.githubusercontent.com",
+      "img-src 'self' blob: data:",
+      "media-src 'self' blob:",
+      "worker-src 'self'",
+      "manifest-src 'self'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      "require-trusted-types-for 'script'",
+    ]);
+    expect(CSP.match(/'[^']*unsafe[^']*'/g)).toEqual(["'wasm-unsafe-eval'"]);
+    expect(CSP.match(/https:\/\/[^\s;]+/g)).toEqual([
+      "https://huggingface.co",
+      "https://*.hf.co",
+      "https://raw.githubusercontent.com",
+    ]);
     expect(html).toContain('<meta name="referrer" content="no-referrer" />');
     // The CSP must come before anything it governs.
     expect(html.indexOf("Content-Security-Policy")).toBeLessThan(html.indexOf("<script"));
@@ -55,6 +74,24 @@ describe("build output", () => {
     const sw = read("sw.js");
     expect(sw).toContain(out.version);
     for (const f of out.files.filter((f) => f !== "sw.js")) expect(sw).toContain(`./${f}`);
+  });
+
+  test("the AI worker is cached on first use, not precached", () => {
+    const sw = read("sw.js");
+    expect(out.aiWorker).toMatch(/^assets\/ai-worker-[a-z0-9]+\.js$/);
+    const precache = /\["\.\/"(?:,"[^"]+")*\]/.exec(sw)?.[0] ?? "";
+    expect(precache).toContain('"./index.html"');
+    expect(precache).not.toContain(out.aiWorker);
+    expect(sw).toContain(`./${out.aiWorker}`);
+    expect(sw).toContain("veil-ai-engine");
+  });
+
+  test("WebLLM is bundled into the AI worker and nowhere else", () => {
+    // A string only WebLLM's runtime (TVM) carries.
+    const marker = "tvmjs";
+    expect(read(out.aiWorker)).toContain(marker);
+    for (const f of out.files.filter((f) => f.endsWith(".js") && f !== out.aiWorker))
+      expect(read(f)).not.toContain(marker);
   });
 
   test("the manifest is installable and its icons exist", () => {

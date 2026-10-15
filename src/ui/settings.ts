@@ -1,6 +1,6 @@
 /**
  * Preferences, persisted in localStorage. Only preferences live here
- * (nickname, transports, relays, STUN/TURN): never a room key, a message or
+ * (nickname, transports, relays, STUN/TURN, on-device AI): never a room key, a message or
  * a file. Every read is defensive: storage may be unavailable or corrupted.
  */
 import { signal } from "@preact/signals";
@@ -16,6 +16,15 @@ export interface TurnServer {
   credential: string;
 }
 
+export interface AiSettings {
+  /** The on-device model picked (a WebLLM id); null until one is downloaded or chosen. */
+  model: string | null;
+  /** Translate chat messages into the user's language as they arrive. */
+  translateChat: boolean;
+  /** Transcribe with the on-device model (an audio model) instead of the browser's recognizer. */
+  modelTranscribe: boolean;
+}
+
 export interface Settings {
   nick: string;
   nostr: { enabled: boolean; relays: string[] };
@@ -25,6 +34,7 @@ export interface Settings {
   turn: TurnServer | null;
   audioDevice: string;
   videoDevice: string;
+  ai: AiSettings;
 }
 
 export function defaultSettings(): Settings {
@@ -37,6 +47,7 @@ export function defaultSettings(): Settings {
     turn: null,
     audioDevice: "",
     videoDevice: "",
+    ai: { model: null, translateChat: false, modelTranscribe: false },
   };
 }
 
@@ -64,6 +75,7 @@ export function parseSettings(raw: string | null): Settings {
   const torrent = obj(x.torrent);
   const manual = obj(x.manual);
   const turn = obj(x.turn);
+  const ai = obj(x.ai);
   return {
     nick: typeof x.nick === "string" ? x.nick.slice(0, 40) : d.nick,
     nostr: {
@@ -86,6 +98,12 @@ export function parseSettings(raw: string | null): Settings {
         : null,
     audioDevice: typeof x.audioDevice === "string" ? x.audioDevice : "",
     videoDevice: typeof x.videoDevice === "string" ? x.videoDevice : "",
+    ai: {
+      model: typeof ai.model === "string" && ai.model.length < 256 ? ai.model : d.ai.model,
+      translateChat: typeof ai.translateChat === "boolean" ? ai.translateChat : d.ai.translateChat,
+      modelTranscribe:
+        typeof ai.modelTranscribe === "boolean" ? ai.modelTranscribe : d.ai.modelTranscribe,
+    },
   };
 }
 

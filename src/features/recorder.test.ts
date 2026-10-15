@@ -4,6 +4,7 @@ import {
   gridLayout,
   initials,
   pickMime,
+  Recorder,
   type Rect,
   recordingNames,
 } from "./recorder";
@@ -137,6 +138,29 @@ describe("formatTranscript", () => {
 
   test("empty without captions", () => {
     expect(formatTranscript(start, [])).toBe("");
+  });
+
+  test("a language does not change the transcript", () => {
+    expect(formatTranscript(start, [{ nick: "Eve", ts: start, text: "hallo", lang: "de" }])).toBe(
+      "[00:00:00] Eve: hallo\n",
+    );
+  });
+});
+
+describe("recorder lines", () => {
+  test("keeps each caption's language and hands out a copy", () => {
+    const rec = new Recorder({ sources: () => [], sink: async () => null, now: () => 0 });
+    rec.addCaption("Alice", 1, "bonjour", "fr-FR");
+    rec.addCaption("Bob", 2, null);
+    const lines = rec.lines();
+    expect(lines).toEqual([
+      { nick: "Alice", ts: 1, text: "bonjour", lang: "fr-FR" },
+      { nick: "Bob", ts: 2, text: null },
+    ]);
+    lines.pop();
+    if (lines[0]) lines[0].text = "changed";
+    expect(rec.lines()).toHaveLength(2);
+    expect(rec.lines()[0]?.text).toBe("bonjour");
   });
 });
 

@@ -872,6 +872,7 @@ textarea.input {
 }
 
 .stage {
+  position: relative;
   grid-area: stage;
   min-height: 0;
   display: flex;
@@ -1669,11 +1670,14 @@ textarea.input {
     letter-spacing: 0;
   }
 
+  /* Every call control keeps its size; the bar takes a second row on narrow phones. */
   .controls {
+    flex-wrap: wrap;
     gap: 10px;
   }
 
   .control {
+    flex: none;
     width: 48px;
     height: 48px;
   }
@@ -1889,4 +1893,173 @@ textarea.input {
 
 .file-entry .file-card {
   width: 100%;
+}
+
+/* AI on this device */
+.ai-builtin,
+.ai-alternatives ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-builtin li,
+.ai-alternatives li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  font-size: 14px;
+}
+
+.ai-builtin-progress {
+  flex: 0 1 120px;
+}
+
+.ai-model {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+
+.ai-model-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--accent);
+}
+
+.ai-model-head .file-name {
+  color: var(--text);
+}
+
+.ai-model .row,
+.ai-alternatives li {
+  flex-wrap: wrap;
+}
+
+.ai-alternatives summary {
+  min-height: 32px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ai-alternatives .file-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── live captions ────────────────────────────────────────────────────── */
+.chip-cc {
+  background: oklch(1 0 0 / 0.16);
+  color: var(--on-stage);
+  letter-spacing: 0.04em;
+}
+
+.live-captions {
+  position: absolute;
+  inset: auto 12px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.live-caption {
+  max-width: min(720px, 100%);
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: oklch(0 0 0 / 0.72);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.live-caption-nick {
+  font-weight: 700;
+}
+
+.live-caption-note {
+  color: oklch(0.8 0.01 255);
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .live-caption {
+    animation: caption-fade 6s var(--ease) both;
+  }
+}
+
+@keyframes caption-fade {
+  0% {
+    opacity: 0;
+  }
+  5%,
+  88% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ── translation ──────────────────────────────────────────────────────── */
+.translate-msg {
+  margin: 2px 4px 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.translate-msg:hover {
+  color: var(--text);
+}
+
+.translate-msg.on-hover {
+  opacity: 0;
+}
+
+.msg:hover .translate-msg.on-hover,
+.msg:focus-within .translate-msg.on-hover {
+  opacity: 1;
+}
+
+/* ── meeting notes ────────────────────────────────────────────────────── */
+.recording-files li.recording-ai {
+  flex-wrap: wrap;
+}
+
+.recording-preview {
+  flex-basis: 100%;
+  max-height: 200px;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.recording-note {
+  flex-basis: 100%;
 }

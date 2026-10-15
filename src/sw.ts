@@ -4,6 +4,10 @@
  * version installs in the background and waits: the page shows "Update
  * available" and only then asks it to take over, so a call is never
  * interrupted by an update.
+ *
+ * The AI worker (WebLLM, ~2 MB gzip) is the exception: it is not precached
+ * but cached on first use in its own cache, which updates keep. WebLLM's own
+ * caches (`webllm/*`, the model weights) are never touched here.
  */
 export {};
 
@@ -29,6 +33,8 @@ interface FetchEvent extends ExtendableEvent {
 const sw = self as unknown as SwScope;
 const CACHE = `veil-${__SW_VERSION__}`;
 const PRECACHE = __PRECACHE__;
+const AI_CACHE = "veil-ai-engine";
+const AI_WORKER = new URL(__AI_WORKER_URL__, sw.location.href).href;
 
 sw.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)));
@@ -38,7 +44,10 @@ sw.addEventListener("activate", (e) => {
   e.waitUntil(
     (async () => {
       for (const key of await caches.keys())
-        if (key.startsWith("veil-") && key !== CACHE) await caches.delete(key);
+        if (key.startsWith("veil-") && key !== CACHE && key !== AI_CACHE) await caches.delete(key);
+      // Keep only this version's AI worker.
+      const ai = await caches.open(AI_CACHE);
+      for (const req of await ai.keys()) if (req.url !== AI_WORKER) await ai.delete(req);
       await sw.clients.claim();
     })(),
   );
@@ -52,6 +61,19 @@ sw.addEventListener("fetch", (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== "GET" || url.origin !== sw.location.origin) return;
+  if (url.origin + url.pathname === AI_WORKER) {
+    e.respondWith(
+      (async () => {
+        const cache = await caches.open(AI_CACHE);
+        const hit = await cache.match(AI_WORKER);
+        if (hit) return hit;
+        const res = await fetch(req);
+        if (res.ok) await cache.put(AI_WORKER, res.clone());
+        return res;
+      })(),
+    );
+    return;
+  }
   e.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);

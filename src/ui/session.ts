@@ -7,9 +7,18 @@
  * anything changes, and reads plain fields from here.
  */
 import { signal } from "@preact/signals";
+import { getAiEngine } from "../ai/engine";
+import { isAudioModel } from "../ai/modelIds";
+import { chosenModel, ensureModel } from "../ai/store";
 import { sha256 } from "../crypto/bytes";
 import { SAS_EMOJIS, type Sas } from "../crypto/sas";
-import { type Caption, speechRecognition, Transcriber } from "../features/captions";
+import { AudioTranscriber } from "../features/audioCaptions";
+import {
+  type Caption,
+  type CaptionSource,
+  speechRecognition,
+  Transcriber,
+} from "../features/captions";
 import { Chat, type ChatMessage } from "../features/chat";
 import {
   clearTemporaryFiles,
@@ -19,7 +28,12 @@ import {
   pickSink,
 } from "../features/files";
 import { detectE2ee, Media, rtcConfigFor } from "../features/media";
-import { Recorder, type RecorderSource, type RecordingUrls } from "../features/recorder";
+import {
+  type CaptionLine,
+  Recorder,
+  type RecorderSource,
+  type RecordingUrls,
+} from "../features/recorder";
 import type { PeerState } from "../mesh/peer";
 import type { AppMessage, MediaState } from "../mesh/protocol";
 import { type LinkInfo, type Member, Room } from "../mesh/room";
@@ -61,9 +75,21 @@ export interface Toast {
 
 export type RecordingState = "idle" | "recording" | "stopping";
 
-/** The files of a finished recording, with when it started (for their names). */
+/** A caption line shown live, ours or a member's. */
+export interface LiveCaption {
+  nick: string;
+  text: string;
+  /** The speaker's language (BCP 47), when their device said. */
+  lang?: string;
+  ts: number;
+}
+
+const LIVE_CAPTIONS = 20;
+
+/** The files of a finished recording, with when it started (for their names) and what was said. */
 export interface RecordingFiles extends RecordingUrls {
   started: number;
+  lines: CaptionLine[];
 }
 
 const NO_MEDIA: MediaState = { audio: false, video: false, screen: false };
@@ -76,6 +102,10 @@ export class RoomSession {
   /** Files offered to us while the Files view was not on screen. */
   readonly pendingFiles = signal(0);
   readonly recording = signal<RecordingState>("idle");
+  /** We show live captions: everyone is told through our presence. */
+  readonly captionsOn = signal(false);
+  /** The last captions said in the room, oldest first. */
+  readonly liveCaptions = signal<LiveCaption[]>([]);
   chatOpen = false;
   filesVisible = false;
   transports: TransportStatus[] = [];
@@ -100,6 +130,10 @@ export class RoomSession {
   private readonly transcriber: Transcriber;
   /** Who was recording at the last members update, to announce changes. */
   private recordingMembers = new Set<string>();
+  /** Who had captions on at the last members update. */
+  private captionMembers = new Set<string>();
+  /** The microphone track the transcriber was started on. */
+  private transcribedTrack: MediaStreamTrack | null = null;
 
   private constructor(
     readonly room: Room,
@@ -123,7 +157,7 @@ export class RoomSession {
       keys: room.keys,
       memberMedia: (id) => room.members.get(id)?.media,
       memberE2ee: (id) => room.members.get(id)?.e2ee ?? false,
-      publish: (state) => room.setMedia({ ...state, recording: this.isRecording }),
+      publish: (state) => room.setMedia(this.presence(state)),
       onChange: () => {
         this.syncTranscriber();
         this.changed();
@@ -144,6 +178,7 @@ export class RoomSession {
       Recognition: speechRecognition(),
       lang: navigator.language,
       send: (caption) => this.onOwnCaption(caption),
+      fallback: () => this.audioCaptions(),
     });
   }
 
@@ -259,6 +294,13 @@ export class RoomSession {
     for (const id of this.recordingMembers)
       if (!recording.has(id)) this.toast(`${this.nickOf(id)} stopped recording`);
     this.recordingMembers = recording;
+    const captions = new Set<string>();
+    for (const m of this.room.members.values()) if (m.media?.captions) captions.add(m.peerId);
+    for (const id of captions)
+      if (!this.captionMembers.has(id)) this.toast(`${this.nickOf(id)} turned on captions`);
+    for (const id of this.captionMembers)
+      if (!captions.has(id)) this.toast(`${this.nickOf(id)} turned off captions`);
+    this.captionMembers = captions;
     this.syncTranscriber();
     this.changed();
   }
@@ -295,7 +337,9 @@ export class RoomSession {
     } else if (msg.type === "file-cancel") {
       this.files.onApp(author, msg);
     } else if (msg.type === "caption") {
-      this.recorder?.addCaption(this.nickOf(author), msg.ts, msg.unavailable ? null : msg.text);
+      const nick = this.nickOf(author);
+      this.recorder?.addCaption(nick, msg.ts, msg.unavailable ? null : msg.text, msg.lang);
+      if (!msg.unavailable) this.addLiveCaption(nick, msg.ts, msg.text, msg.lang);
     } else {
       const before = this.chat.messages.length;
       this.chat.onApp(author, msg);
@@ -314,7 +358,7 @@ export class RoomSession {
         peerId: this.peerId,
         nick: this.params.nick || "You",
         self: true,
-        media: { ...this.media.state(), recording: this.isRecording },
+        media: this.presence(this.media.state()),
         link: null,
         rtt: null,
         relayed: false,
@@ -515,11 +559,22 @@ export class RoomSession {
     const urls = await recorder.stop();
     this.recording.value = "idle";
     this.changed();
-    return { ...urls, started: recorder.started };
+    return { ...urls, started: recorder.started, lines: recorder.lines() };
   }
 
+  /** Turns our live captions on or off. */
+  toggleCaptions(): void {
+    this.captionsOn.value = !this.captionsOn.value;
+    this.publishRecording();
+  }
+
+  private presence(state: MediaState): MediaState {
+    return { ...state, recording: this.isRecording, captions: this.captionsOn.value };
+  }
+
+  /** Publishes our recording and captions state. */
   private publishRecording(): void {
-    this.room.setMedia({ ...this.media.state(), recording: this.isRecording });
+    this.room.setMedia(this.presence(this.media.state()));
     this.syncTranscriber();
     this.changed();
   }
@@ -542,23 +597,67 @@ export class RoomSession {
     return out;
   }
 
-  /** Captions run while anyone records and our microphone is on. */
+  /** Captions run while anyone records or has captions on, and our microphone is on. */
   private syncTranscriber(): void {
     // Media can report a change before the constructor has created the transcriber.
     if (!this.transcriber) return;
-    const wanted =
-      !this.left && this.media.micOn && (this.isRecording || this.recordingMembers.size > 0);
-    if (wanted) void this.transcriber.start();
-    else this.transcriber.stop();
+    const needed =
+      this.isRecording ||
+      this.recordingMembers.size > 0 ||
+      this.captionsOn.value ||
+      this.captionMembers.size > 0;
+    const track = this.media.audioTrack;
+    if (!this.left && this.media.micOn && needed) {
+      // A new microphone (device switch) restarts transcription on it.
+      if (track !== this.transcribedTrack) this.transcriber.stop();
+      this.transcribedTrack = track;
+      void this.transcriber.start();
+    } else {
+      this.transcriber.stop();
+      this.transcribedTrack = null;
+    }
+  }
+
+  /**
+   * Captions from the on-device audio model, when allowed to transcribe: the chosen
+   * model is loaded if it is fully cached (never downloaded from here).
+   */
+  private async audioCaptions(): Promise<CaptionSource | null> {
+    if (!settings.value.ai.modelTranscribe) return null;
+    const chosen = chosenModel();
+    if (!chosen || !isAudioModel(chosen)) return null;
+    try {
+      if (!(await ensureModel())) return null;
+    } catch (err) {
+      console.warn("AI model failed to load", err);
+      return null;
+    }
+    const engine = getAiEngine();
+    if (!engine.ready || !engine.modelId || !isAudioModel(engine.modelId)) return null;
+    return new AudioTranscriber({
+      track: () => this.media.audioTrack,
+      engine,
+      lang: navigator.language,
+      send: (caption) => this.onOwnCaption(caption),
+    });
   }
 
   private onOwnCaption(caption: Caption): void {
-    void this.room.send({ type: "caption", ...caption });
-    this.recorder?.addCaption(
-      this.nickOf(this.peerId),
-      caption.ts,
-      "unavailable" in caption ? null : caption.text,
-    );
+    const nick = this.nickOf(this.peerId);
+    if ("unavailable" in caption) {
+      void this.room.send({ type: "caption", ...caption });
+      this.recorder?.addCaption(nick, caption.ts, null);
+      return;
+    }
+    const lang = caption.lang ?? navigator.language;
+    void this.room.send({ type: "caption", ts: caption.ts, text: caption.text, lang });
+    this.recorder?.addCaption(nick, caption.ts, caption.text, lang);
+    this.addLiveCaption(nick, caption.ts, caption.text, lang);
+  }
+
+  private addLiveCaption(nick: string, ts: number, text: string, lang?: string): void {
+    const line: LiveCaption = lang ? { nick, text, lang, ts } : { nick, text, ts };
+    this.liveCaptions.value = [...this.liveCaptions.value, line].slice(-LIVE_CAPTIONS);
   }
 
   hangUp(): void {

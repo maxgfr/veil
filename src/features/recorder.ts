@@ -85,6 +85,8 @@ export interface CaptionLine {
   ts: number;
   /** null when the speaker's device cannot transcribe. */
   text: string | null;
+  /** The speaker's language (BCP 47), when their device said. */
+  lang?: string;
 }
 
 /** `[hh:mm:ss] Nick: text`, elapsed since `start`; notices carry no time. */
@@ -232,8 +234,13 @@ export class Recorder {
     return track;
   }
 
-  addCaption(nick: string, ts: number, text: string | null): void {
-    this.captions.push({ nick, ts, text });
+  addCaption(nick: string, ts: number, text: string | null, lang?: string): void {
+    this.captions.push(lang ? { nick, ts, text, lang } : { nick, ts, text });
+  }
+
+  /** The transcript so far (a copy). */
+  lines(): CaptionLine[] {
+    return this.captions.map((l) => ({ ...l }));
   }
 
   private tick(): void {
