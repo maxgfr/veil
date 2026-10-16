@@ -4,11 +4,11 @@
 # as Verified), then moves the local checkout onto it. semantic-release tags
 # whatever HEAD is after its prepare step, so the tag lands on this commit.
 # Fails, without committing, if main is no longer at the local HEAD.
-# Usage: scripts/cli-release-commit.sh <version>   (needs GH_TOKEN, GITHUB_REPOSITORY)
+# Usage: scripts/cli-release-commit.sh <version>   (needs GITHUB_TOKEN or GH_TOKEN, and GITHUB_REPOSITORY)
 set -euo pipefail
 
 version="${1:?usage: scripts/cli-release-commit.sh <version>}"
-: "${GH_TOKEN:?}" "${GITHUB_REPOSITORY:?}"
+: "${GITHUB_TOKEN:-${GH_TOKEN:?}}" "${GITHUB_REPOSITORY:?}"
 
 cd "$(dirname "$0")/.."
 tmp=$(mktemp -d)
