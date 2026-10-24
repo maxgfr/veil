@@ -1,6 +1,6 @@
 [package]
 name = "veil-cli"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "Command-line client for Veil rooms: send and receive files, and chat, peer-to-peer and end-to-end encrypted"
 license = "MIT"
