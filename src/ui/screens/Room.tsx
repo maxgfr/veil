@@ -195,11 +195,14 @@ export function Room(props: {
           {e2eeMedia && (
             <span
               class="chip chip-ok"
+              role="img"
+              aria-label="E2EE media"
               data-testid="e2ee-badge"
               title="Audio and video frames are encrypted end to end"
             >
               <Icon name="shield" size={14} />
-              E2EE media
+              {/* The shield alone on a phone, where the words push the bar into the buttons. */}
+              <span class="hide-sm">E2EE media</span>
             </span>
           )}
         </div>

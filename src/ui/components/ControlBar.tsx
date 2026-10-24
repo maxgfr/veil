@@ -4,6 +4,7 @@ import type { RoomMode } from "../../crypto/room";
 import type { RoomSession } from "../session";
 import { type Layout, saveSettings, settings } from "../settings";
 import { Icon, type IconName } from "./Icons";
+import { FITS } from "./VideoGrid";
 
 function Control(props: {
   icon: IconName;
@@ -36,7 +37,37 @@ const LAYOUTS: { value: Layout; label: string; hint: string }[] = [
   { value: "spotlight", label: "Spotlight", hint: "One in large, the rest beside" },
 ];
 
-/** Grid, Spotlight or Auto: how this device lays out the call. */
+function MenuItem(props: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onPick: () => void;
+  testid: string;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={props.checked}
+      class="menu-item"
+      onClick={props.onPick}
+      data-testid={props.testid}
+    >
+      <span class="menu-check" aria-hidden="true">
+        {props.checked && <Icon name="check" size={16} />}
+      </span>
+      <span>
+        <span class="menu-label">{props.label}</span>
+        <span class="menu-hint">{props.hint}</span>
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Grid, Spotlight or Auto: how this device lays out the call; and how camera
+ * videos sit in their tiles.
+ */
 function LayoutMenu(): JSX.Element {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -57,7 +88,7 @@ function LayoutMenu(): JSX.Element {
       removeEventListener("keydown", key);
     };
   }, [open]);
-  const current = settings.value.layout;
+  const { layout, videoFit } = settings.value;
   return (
     <div class="layout-menu" ref={root}>
       <button
@@ -75,27 +106,34 @@ function LayoutMenu(): JSX.Element {
       {open && (
         <div class="menu" role="menu" aria-label="Layout">
           {LAYOUTS.map((l) => (
-            <button
+            <MenuItem
               key={l.value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={current === l.value}
-              class="menu-item"
-              onClick={() => {
+              label={l.label}
+              hint={l.hint}
+              checked={layout === l.value}
+              onPick={() => {
                 saveSettings({ ...settings.value, layout: l.value });
                 setOpen(false);
               }}
-              data-testid={`layout-${l.value}`}
-            >
-              <span class="menu-check" aria-hidden="true">
-                {current === l.value && <Icon name="check" size={16} />}
-              </span>
-              <span>
-                <span class="menu-label">{l.label}</span>
-                <span class="menu-hint">{l.hint}</span>
-              </span>
-            </button>
+              testid={`layout-${l.value}`}
+            />
           ))}
+          <fieldset class="menu-group">
+            <legend class="menu-heading">Camera picture</legend>
+            {(Object.keys(FITS) as (keyof typeof FITS)[]).map((f) => (
+              <MenuItem
+                key={f}
+                label={FITS[f].label}
+                hint={FITS[f].hint}
+                checked={videoFit === f}
+                onPick={() => {
+                  saveSettings({ ...settings.value, videoFit: f });
+                  setOpen(false);
+                }}
+                testid={`fit-${f}`}
+              />
+            ))}
+          </fieldset>
         </div>
       )}
     </div>

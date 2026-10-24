@@ -76,6 +76,7 @@ export function SettingsSheet(props: {
       noiseReduction: settings.value.noiseReduction,
       screenQuality: settings.value.screenQuality,
       layout: settings.value.layout,
+      videoFit: settings.value.videoFit,
       language: settings.value.language,
       ai: settings.value.ai,
       nostr: { ...draft.nostr, relays: parseUrlList(relays, ["wss://", "ws://"]) },

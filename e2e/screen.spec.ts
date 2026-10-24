@@ -75,8 +75,13 @@ test("a shared screen shows in large, beside the sharer's camera, with its own c
   await b.page.evaluate(() => document.exitFullscreen());
   await expect.poll(() => b.page.evaluate(() => document.fullscreenElement === null)).toBe(true);
 
+  // Fit, Fill, Stretch, then back to Fit.
   await b.page.getByTestId("spotlight-fit").click();
   await expect(big).toHaveAttribute("data-fit", "cover");
+  await b.page.getByTestId("spotlight-fit").click();
+  await expect(big).toHaveAttribute("data-fit", "fill");
+  await b.page.getByTestId("spotlight-fit").click();
+  await expect(big).toHaveAttribute("data-fit", "contain");
 
   // A: Enlarge on B's camera puts B's face in large; a double-click does the same.
   await a.page.getByTestId("tile-remote").getByTestId("tile-enlarge").click();
@@ -93,6 +98,17 @@ test("a shared screen shows in large, beside the sharer's camera, with its own c
   await expect(stage(b.page)).toHaveAttribute("data-layout", "grid");
   const screenTile = b.page.getByTestId("tile-screen");
   await expect(screenTile.getByTestId("video-screen")).toHaveAttribute("data-fit", "contain");
+  // A camera shows whole by default; the Layout menu changes every camera, never a screen.
+  const remoteVideo = b.page.getByTestId("tile-remote").getByTestId("video-remote");
+  await expect(remoteVideo).toHaveAttribute("data-fit", "contain");
+  await b.page.getByTestId("layout").click();
+  await b.page.getByTestId("fit-cover").click();
+  await expect(remoteVideo).toHaveAttribute("data-fit", "cover");
+  await expect(b.page.getByTestId("video-self")).toHaveAttribute("data-fit", "cover");
+  await expect(screenTile.getByTestId("video-screen")).toHaveAttribute("data-fit", "contain");
+  await b.page.getByTestId("layout").click();
+  await b.page.getByTestId("fit-contain").click();
+  await expect(remoteVideo).toHaveAttribute("data-fit", "contain");
   const sizes = await Promise.all(
     [screenTile, b.page.getByTestId("tile-remote"), b.page.getByTestId("tile-self")].map(
       async (t) => {

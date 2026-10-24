@@ -1,10 +1,16 @@
 import type { JSX, RefObject } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import type { MemberView, RoomSession } from "../session";
+import type { VideoFit } from "../settings";
 import { hueOf, initials } from "./format";
 import { Icon } from "./Icons";
 
-export type Fit = "contain" | "cover";
+/** The ways a video can sit in its tile, each with the one a click moves to. */
+export const FITS: Record<VideoFit, { label: string; hint: string; next: VideoFit }> = {
+  contain: { label: "Fit", hint: "The whole picture, with bars", next: "cover" },
+  cover: { label: "Fill", hint: "Fills the tile, crops the edges", next: "fill" },
+  fill: { label: "Stretch", hint: "Fills the tile, stretches the picture", next: "contain" },
+};
 
 /** One thing on the stage: a member's camera, or a screen they share. */
 export interface StageTile {
@@ -24,7 +30,7 @@ export function Video(props: {
   muted: boolean;
   mirror: boolean;
   testid: string;
-  fit?: Fit;
+  fit: VideoFit;
   inner?: RefObject<HTMLVideoElement>;
 }): JSX.Element {
   const own = useRef<HTMLVideoElement>(null);
@@ -33,18 +39,15 @@ export function Video(props: {
     const v = ref.current;
     if (v && v.srcObject !== props.stream) v.srcObject = props.stream;
   }, [props.stream, ref]);
-  const classes = [props.mirror && "mirror", props.fit === "contain" && "fit-contain"]
-    .filter(Boolean)
-    .join(" ");
   return (
     <video
       ref={ref}
-      class={classes || undefined}
+      class={`fit-${props.fit}${props.mirror ? " mirror" : ""}`}
       autoPlay
       playsInline
       muted={props.muted}
       data-testid={props.testid}
-      data-fit={props.fit ?? "cover"}
+      data-fit={props.fit}
     />
   );
 }
@@ -138,6 +141,7 @@ export function toggleFullscreen(container: HTMLElement | null, video: HTMLVideo
 
 function Tile(props: {
   tile: StageTile;
+  fit: VideoFit;
   pinned: boolean;
   onPin: (key: string | null) => void;
 }): JSX.Element {
@@ -170,7 +174,7 @@ function Tile(props: {
           stream={tile.stream}
           muted
           mirror={m.self && !screen}
-          fit={screen || tile.legacyScreen ? "contain" : "cover"}
+          fit={props.fit}
           testid={screen ? "video-screen" : m.self ? "video-self" : "video-remote"}
           inner={video}
         />
@@ -219,6 +223,7 @@ function Tile(props: {
 /** Every tile at the same size, or (as the strip) the tiles beside the spotlight. */
 export function VideoGrid(props: {
   tiles: StageTile[];
+  fitOf: (tile: StageTile) => VideoFit;
   pinned: string | null;
   onPin: (key: string | null) => void;
   strip?: boolean;
@@ -233,7 +238,13 @@ export function VideoGrid(props: {
       data-testid={props.strip ? "strip" : undefined}
     >
       {props.tiles.map((t) => (
-        <Tile key={t.key} tile={t} pinned={props.pinned === t.key} onPin={props.onPin} />
+        <Tile
+          key={t.key}
+          tile={t}
+          fit={props.fitOf(t)}
+          pinned={props.pinned === t.key}
+          onPin={props.onPin}
+        />
       ))}
     </div>
   );

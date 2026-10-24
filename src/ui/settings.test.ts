@@ -62,6 +62,23 @@ describe("parseSettings layout", () => {
   });
 });
 
+describe("parseSettings videoFit", () => {
+  test("defaults to the whole picture", () => {
+    expect(defaultSettings().videoFit).toBe("contain");
+    expect(parseSettings(null).videoFit).toBe("contain");
+  });
+
+  test("keeps a known value", () => {
+    for (const videoFit of ["contain", "cover", "fill"] as const)
+      expect(parseSettings(JSON.stringify({ videoFit })).videoFit).toBe(videoFit);
+  });
+
+  test("an unknown value falls back to the default", () => {
+    expect(parseSettings(JSON.stringify({ videoFit: "zoom" })).videoFit).toBe("contain");
+    expect(parseSettings(JSON.stringify({ videoFit: 1 })).videoFit).toBe("contain");
+  });
+});
+
 describe("parseSettings language", () => {
   test("defaults to the browser's", () => {
     expect(defaultSettings().language).toBe("");

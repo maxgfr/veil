@@ -3,13 +3,13 @@
  * else the latest shared screen, else whoever speaks) with the rest in a strip.
  */
 import type { JSX } from "preact";
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { MemberView, RoomSession } from "../session";
-import { type ScreenQuality, settings } from "../settings";
+import { type ScreenQuality, settings, type VideoFit } from "../settings";
 import { hueOf, initials } from "./format";
 import { Icon } from "./Icons";
 import {
-  type Fit,
+  FITS,
   RemoteAudio,
   type StageTile,
   stageTiles,
@@ -26,19 +26,19 @@ const QUALITIES: { value: ScreenQuality; label: string }[] = [
 function Spotlight(props: {
   session: RoomSession;
   tile: StageTile;
+  fit: VideoFit;
+  onFit: (fit: VideoFit) => void;
   screens: StageTile[];
   pinned: boolean;
   onPin: (key: string | null) => void;
 }): JSX.Element {
   const s = props.session;
-  const { tile } = props;
+  const { tile, fit } = props;
   const m = tile.member;
   const box = useRef<HTMLElement>(null);
   const video = useRef<HTMLVideoElement>(null);
-  // Fit or Fill per tile: a screen starts whole, a face fills the frame.
-  const [fits, setFits] = useState<Record<string, Fit>>({});
   const screen = tile.kind === "screen" || tile.legacyScreen;
-  const fit = fits[tile.key] ?? (screen ? "contain" : "cover");
+  const next = FITS[fit].next;
   const sharing = m.self && tile.kind === "screen";
   const name = m.self ? `${m.nick} (you)` : m.nick;
   const title = screen ? `${name}'s screen` : name;
@@ -102,9 +102,9 @@ function Spotlight(props: {
         <button
           type="button"
           class="tile-btn"
-          aria-label={fit === "contain" ? "Fill the frame" : "Fit the whole picture"}
-          title={fit === "contain" ? "Fill" : "Fit"}
-          onClick={() => setFits({ ...fits, [tile.key]: fit === "contain" ? "cover" : "contain" })}
+          aria-label={`Picture: ${FITS[fit].label}. Switch to ${FITS[next].label}`}
+          title={`${FITS[fit].label} · switch to ${FITS[next].label}`}
+          onClick={() => props.onFit(next)}
           data-testid="spotlight-fit"
         >
           <Icon name="fit" size={18} />
@@ -154,6 +154,14 @@ export function Stage(props: {
 }): JSX.Element {
   const s = props.session;
   const tiles = stageTiles(s, props.members);
+  // Fit, Fill or Stretch per tile, over the default: a screen starts whole,
+  // a camera as the Layout menu says.
+  const [fits, setFits] = useState<Record<string, VideoFit>>({});
+  // A new default in the Layout menu applies to every tile, picked ones included.
+  const videoFit = settings.value.videoFit;
+  useEffect(() => setFits({}), [videoFit]);
+  const fitOf = (t: StageTile): VideoFit =>
+    fits[t.key] ?? (t.kind === "screen" || t.legacyScreen ? "contain" : videoFit);
   const screens = tiles.filter((t) => t.kind === "screen" || t.legacyScreen);
   // When each screen appeared: the most recent one goes in large.
   const seen = useRef(new Map<string, number>());
@@ -184,6 +192,8 @@ export function Stage(props: {
           <Spotlight
             session={s}
             tile={main}
+            fit={fitOf(main)}
+            onFit={(fit) => setFits({ ...fits, [main.key]: fit })}
             screens={screens}
             pinned={pinned === main}
             onPin={props.onPin}
@@ -192,13 +202,14 @@ export function Stage(props: {
             <VideoGrid
               strip
               tiles={tiles.filter((t) => t !== main)}
+              fitOf={fitOf}
               pinned={props.pinned}
               onPin={props.onPin}
             />
           )}
         </>
       ) : (
-        <VideoGrid tiles={tiles} pinned={props.pinned} onPin={props.onPin} />
+        <VideoGrid tiles={tiles} fitOf={fitOf} pinned={props.pinned} onPin={props.onPin} />
       )}
       <RemoteAudio session={s} members={props.members} />
     </div>
