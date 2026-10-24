@@ -100,6 +100,7 @@ export interface RoomEvents {
   file?(peer: Peer, frame: Frame): void;
   /** Our own or someone else's sender key changed (media keys follow). */
   keys?(): void;
+  memberJoined?(peerId: string): void;
   memberLeft?(peerId: string): void;
 }
 
@@ -644,6 +645,7 @@ export class Room {
     }
     if (isNew) this.maintain();
     this.emitMembers();
+    if (isNew && !this.blocked.has(author)) this.events.memberJoined?.(author);
   }
 
   private async sendKeyTo(peerId: string): Promise<void> {

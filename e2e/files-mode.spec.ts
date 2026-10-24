@@ -55,6 +55,42 @@ test("a files room has no camera or microphone, and moves files through its File
   await b.ctx.close();
 });
 
+test("someone who joins after a file was offered still sees it and can take it", async ({
+  browser,
+}) => {
+  const a = await member(browser);
+  const b = await member(browser);
+  await b.ctx.addInitScript(() => {
+    delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+  });
+  await a.page.goto("http://localhost:4173/?nosw");
+  await a.page.getByTestId("send-files").click();
+  await a.page.getByTestId("nick").fill("Ada");
+  await a.page.getByTestId("enter-room").click();
+  await closeSheets(a.page);
+  const data = Buffer.from(Array.from({ length: 200_003 }, (_, i) => (i * 7) & 255));
+  // Offered while Ada is alone in the room.
+  await a.page
+    .getByTestId("files-input")
+    .setInputFiles({ name: "early.bin", mimeType: "application/octet-stream", buffer: data });
+  await expect(a.page.getByTestId("files-panel").getByTestId("file-card")).toBeVisible();
+
+  await joinRoom(b, a.page.url(), "Bob");
+  await closeSheets(b.page);
+  const panel = b.page.getByTestId("files-panel");
+  await expect(panel.getByText("From Ada")).toBeVisible({ timeout: 30_000 });
+  await expect(panel.getByTestId("file-card")).toHaveCount(1);
+  await panel.getByTestId("file-accept").click();
+  await expect(panel.locator("[data-testid=file-card][data-state=done]")).toBeVisible({
+    timeout: 30_000,
+  });
+  const download = b.page.waitForEvent("download");
+  await panel.getByTestId("file-save").click();
+  expect(sha(readFileSync(await (await download).path()))).toBe(sha(data));
+  await a.ctx.close();
+  await b.ctx.close();
+});
+
 test("in a call room, an offered file shows a badge and the Files panel lists it", async ({
   browser,
 }) => {

@@ -154,6 +154,20 @@ describe("files", () => {
     await until(() => b.incoming.get(two.id)?.pub.state === "cancelled");
   });
 
+  test("a latecomer hears the files still on offer, once each", async () => {
+    const { a, b } = setup();
+    const kept = await a.offer(new Blob([randomBytes(10)]), "kept");
+    const gone = await a.offer(new Blob([randomBytes(10)]), "gone");
+    await a.cancelOutgoing(gone.id);
+    // b joins only now: it missed both offers.
+    b.incoming.clear();
+    await a.reannounce();
+    expect([...b.incoming.keys()]).toEqual([kept.id]);
+    b.decline(kept.id);
+    await a.reannounce();
+    expect(b.incoming.get(kept.id)?.pub.state).toBe("declined");
+  });
+
   test("accepting asks for a direct link to the sender", async () => {
     const { a, b, A, required } = setup();
     const out = await a.offer(new Blob([randomBytes(3)]), "x");

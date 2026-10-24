@@ -177,6 +177,15 @@ export class Files {
     this.d.onChange();
   }
 
+  /** An offer is flooded once: someone who joins later hears ours again (receivers de-duplicate). */
+  async reannounce(): Promise<void> {
+    for (const { pub } of this.outgoing.values()) {
+      if (pub.cancelled) continue;
+      const { id, name, size, mime } = pub;
+      await this.d.send({ type: "file-offer", id, name, size, mime });
+    }
+  }
+
   private async stream(peer: FilePeer, out: OutgoingInternal, from: number): Promise<void> {
     const { pub } = out;
     const total = chunkCount(pub.size);

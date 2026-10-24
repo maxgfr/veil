@@ -187,6 +187,7 @@ export class RoomSession {
         ctrl: (peer, msg) => session?.media.onCtrl(peer, msg),
         file: (peer, frame) => session?.files.onFrame(peer, frame),
         keys: () => session?.media.onKeys(),
+        memberJoined: () => void session?.files.reannounce(),
         memberLeft: (id) => {
           if (!session) return;
           session.files.onMemberLeft(id);
