@@ -25,6 +25,11 @@ export interface AiSettings {
 export type ScreenQuality = "detail" | "motion";
 /** How the call stage is laid out on this device. */
 export type Layout = "auto" | "grid" | "spotlight";
+/**
+ * How a video sits in its tile, as its CSS object-fit: whole with bars
+ * (contain), cropped to fill (cover), or stretched to fill (fill).
+ */
+export type VideoFit = "contain" | "cover" | "fill";
 
 export interface Settings {
   nick: string;
@@ -40,6 +45,8 @@ export interface Settings {
   ai: AiSettings;
   screenQuality: ScreenQuality;
   layout: Layout;
+  /** How camera videos sit in their tiles; a shared screen always starts whole. */
+  videoFit: VideoFit;
   /**
    * The language translations land in, as a BCP 47 tag;
    * "" follows the browser's.
@@ -61,6 +68,7 @@ export function defaultSettings(): Settings {
     ai: { translateChat: false },
     screenQuality: "detail",
     layout: "auto",
+    videoFit: "contain",
     language: "",
   };
 }
@@ -122,6 +130,10 @@ export function parseSettings(raw: string | null): Settings {
         : d.screenQuality,
     layout:
       x.layout === "auto" || x.layout === "grid" || x.layout === "spotlight" ? x.layout : d.layout,
+    videoFit:
+      x.videoFit === "contain" || x.videoFit === "cover" || x.videoFit === "fill"
+        ? x.videoFit
+        : d.videoFit,
     language:
       typeof x.language === "string" && /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(x.language)
         ? x.language
