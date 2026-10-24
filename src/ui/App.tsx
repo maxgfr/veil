@@ -83,6 +83,13 @@ export function App(): JSX.Element {
   };
 
   const join = async (key: Uint8Array, mode: RoomMode, c: LobbyChoice) => {
+    // Plain http:// on a LAN address (not localhost): the browser withholds WebCrypto.
+    if (!globalThis.crypto?.subtle) {
+      setError(
+        "This page was opened over plain http://, so the browser disables encryption. Open it over https:// or on localhost.",
+      );
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
