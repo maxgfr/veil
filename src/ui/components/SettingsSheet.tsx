@@ -50,6 +50,8 @@ export function SettingsSheet(props: {
   const [relays, setRelays] = useState("");
   const [trackers, setTrackers] = useState("");
   const [stun, setStun] = useState("");
+  // The last save could not be stored (storage of the shared origin full, or blocked).
+  const [unsaved, setUnsaved] = useState(false);
   // Lazy: the model catalog and the detection only load once Settings is shown.
   const [AiView, setAiView] = useState<{ C: AiSettingsView } | null>(null);
 
@@ -60,6 +62,7 @@ export function SettingsSheet(props: {
     setRelays(s.nostr.relays.join("\n"));
     setTrackers(s.torrent.trackers.join("\n"));
     setStun(s.stun.join("\n"));
+    setUnsaved(false);
   }, [props.open]);
 
   useEffect(() => {
@@ -67,8 +70,8 @@ export function SettingsSheet(props: {
     void import("./AiSettings").then((m) => setAiView({ C: m.AiSettings }));
   }, [props.open, AiView]);
 
-  const save = () => {
-    saveSettings({
+  const save = async () => {
+    const stored = await saveSettings({
       ...draft,
       // Saved as soon as they are picked: never overwrite them with the draft.
       audioDevice: settings.value.audioDevice,
@@ -83,7 +86,8 @@ export function SettingsSheet(props: {
       torrent: { ...draft.torrent, trackers: parseUrlList(trackers, ["wss://", "ws://"]) },
       stun: parseUrlList(stun, ["stun:", "stuns:"]),
     });
-    props.onClose();
+    setUnsaved(!stored);
+    if (stored) props.onClose();
   };
 
   const turn = draft.turn ?? { urls: "", username: "", credential: "" };
@@ -98,7 +102,7 @@ export function SettingsSheet(props: {
         class="stack"
         onSubmit={(e) => {
           e.preventDefault();
-          save();
+          void save();
         }}
       >
         {props.inRoom && (
@@ -213,12 +217,18 @@ export function SettingsSheet(props: {
           )}
         </fieldset>
 
+        {unsaved && (
+          <p class="error" role="alert" data-testid="settings-not-saved">
+            Storage for this site is full or blocked: these settings apply now but will be lost on
+            reload.
+          </p>
+        )}
         <div class="row row-between">
           <button
             type="button"
             class="btn btn-ghost"
             onClick={() => {
-              resetSettings();
+              void resetSettings().then((stored) => setUnsaved(!stored));
               const d = { ...defaultSettings(), nick: draft.nick };
               setDraft(d);
               setRelays(d.nostr.relays.join("\n"));

@@ -59,7 +59,7 @@ function ScheduleForm(props: {
   const [mode, setMode] = useState<RoomMode>("call");
   const [error, setError] = useState<string | null>(null);
 
-  const submit = () => {
+  const submit = async () => {
     const start = localStart(date, time);
     if (start === null) {
       setError("Pick a date and a start time.");
@@ -76,7 +76,7 @@ function ScheduleForm(props: {
       minutes,
       link: props.newLink(mode),
     };
-    if (!addMeeting(m)) {
+    if (!(await addMeeting(m))) {
       setError(`You already have ${MAX_MEETINGS} meetings scheduled. Remove one first.`);
       return;
     }
@@ -90,7 +90,7 @@ function ScheduleForm(props: {
       data-testid="schedule-form"
       onSubmit={(e) => {
         e.preventDefault();
-        submit();
+        void submit();
       }}
     >
       <label class="field">
