@@ -2,10 +2,13 @@
  * Preferences, persisted in localStorage. Only preferences live here
  * (nickname, transports, relays, STUN/TURN, language, built-in AI): never a room key, a message or
  * a file. Every read is defensive: storage may be unavailable or corrupted.
+ *
+ * Every maxgfr.github.io site reads this origin's localStorage, so the one secret, a TURN
+ * password, is kept out of it in clear: it is stored sealed (sealed.ts) under its own key.
  */
 import { signal } from "@preact/signals";
-
 import { DEFAULT_RELAYS, DEFAULT_TRACKERS } from "../signal/defaults";
+import { deviceKey, type Sealer, sealerFor } from "./sealed";
 
 export { DEFAULT_RELAYS, DEFAULT_TRACKERS };
 export const DEFAULT_STUN = ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"];
@@ -151,18 +154,77 @@ function load(): Settings {
 
 export const settings = signal<Settings>(load());
 
-export function saveSettings(next: Settings): void {
-  settings.value = next;
+/** The TURN password, sealed. */
+const TURN_KEY = "veil.turn.v1";
+const turnSealer: Sealer = sealerFor(deviceKey, TURN_KEY);
+/** The password last stored sealed (or found there), to seal only a changed one. */
+let sealedCredential = "";
+
+/** Writes the preferences, the TURN password left out. False when storage refused them. */
+function persist(next: Settings): boolean {
+  const kept = next.turn ? { ...next, turn: { ...next.turn, credential: "" } } : next;
   try {
-    localStorage.setItem(KEY, JSON.stringify(next));
+    localStorage.setItem(KEY, JSON.stringify(kept));
+    return true;
   } catch {
     // Private mode or storage full: keep the in-memory value.
+    return false;
   }
 }
 
-export function resetSettings(): void {
+/** Stores the TURN password sealed (none: removes it). False when it could not be kept. */
+async function sealTurn(credential: string, sealer: Sealer = turnSealer): Promise<boolean> {
+  try {
+    if (credential) localStorage.setItem(TURN_KEY, await sealer.seal(credential));
+    else localStorage.removeItem(TURN_KEY);
+    sealedCredential = credential;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Saves the preferences. Resolves false when they, or the TURN password, could not be stored:
+ * they last until the page is reloaded.
+ */
+export function saveSettings(next: Settings): Promise<boolean> {
+  settings.value = next;
+  const stored = persist(next);
+  const credential = next.turn?.credential ?? "";
+  if (credential === sealedCredential) return Promise.resolve(stored);
+  return sealTurn(credential).then((sealed) => sealed && stored);
+}
+
+/**
+ * Brings the TURN password back from its sealed copy. One kept in clear by an earlier version is
+ * sealed, then dropped from the preferences.
+ */
+export async function loadTurn(sealer: Sealer = turnSealer): Promise<void> {
+  const turn = settings.value.turn;
+  if (!turn) return;
+  if (turn.credential) {
+    if (await sealTurn(turn.credential, sealer)) persist(settings.value);
+    return;
+  }
+  try {
+    const raw = localStorage.getItem(TURN_KEY);
+    if (!raw) return;
+    const credential = await sealer.open(raw);
+    sealedCredential = credential;
+    if (settings.value.turn === turn)
+      settings.value = { ...settings.value, turn: { ...turn, credential } };
+  } catch {
+    // No storage, or no key to open it: no TURN password.
+  }
+}
+
+/** Settles once the TURN password is back: join a room after it. */
+export const turnReady: Promise<void> = loadTurn();
+
+export function resetSettings(): Promise<boolean> {
   const nick = settings.value.nick;
-  saveSettings({ ...defaultSettings(), nick });
+  return saveSettings({ ...defaultSettings(), nick });
 }
 
 export function iceServers(s: Settings): RTCIceServer[] {

@@ -6,11 +6,13 @@ import {
   MAX_MEETINGS,
   type Meeting,
   type MeetingStorage,
+  type MeetingStore,
   meetingStatus,
   meetingStore,
   newMeetingId,
   parseMeetings,
 } from "./meetings";
+import { type Sealer, sealerFor } from "./sealed";
 
 const NOW = Date.UTC(2026, 9, 15, 12, 0);
 const MIN = 60_000;
@@ -127,87 +129,148 @@ function sharedStorage(): MeetingStorage & { data: Map<string, string> } {
     setItem: (k, v) => {
       data.set(k, v);
     },
+    removeItem: (k) => {
+      data.delete(k);
+    },
   };
 }
 
+// The device key, without IndexedDB: one per test file, shared by its "tabs".
+const key = crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+  "encrypt",
+  "decrypt",
+]);
+const sealer: Sealer = sealerFor(() => key, "veil.meetings.v2");
+const tab = (storage: MeetingStorage | null) => meetingStore(storage, () => NOW, sealer);
+/** A store's first read of storage has settled. */
+const opened = async (s: MeetingStore) => {
+  await s.refresh();
+  return s;
+};
+const stored = async (storage: { data: Map<string, string> }) =>
+  parseMeetings(await sealer.open(storage.data.get("veil.meetings.v2") ?? ""), NOW);
+
 const ids = (list: Meeting[]) => list.map((m) => m.id);
 const storageEvent = (key: string | null) => Object.assign(new Event("storage"), { key });
+const settle = () => new Promise((r) => setTimeout(r, 10));
 
 describe("meetingStore across tabs", () => {
-  test("a meeting scheduled in another tab survives this tab's own change", () => {
+  test("the list is stored sealed: no room link or title in clear", async () => {
     const storage = sharedStorage();
-    const tabA = meetingStore(storage, () => NOW);
-    const tabB = meetingStore(storage, () => NOW);
+    const a = await opened(tab(storage));
+    const x = meeting({ title: "Board meeting" });
+    expect(await a.add(x)).toBe(true);
+    const raw = [...storage.data.values()].join("");
+    expect(raw).not.toContain(x.link);
+    expect(raw).not.toContain("veil.example");
+    expect(raw).not.toContain("Board meeting");
+    expect(await stored(storage)).toEqual([x]);
+    // Another tab of this device opens it.
+    expect((await opened(tab(storage))).meetings.value).toEqual([x]);
+  });
+
+  test("a list kept in clear by an earlier version is sealed, then removed", async () => {
+    const storage = sharedStorage();
+    const x = meeting();
+    storage.data.set("veil.meetings.v1", JSON.stringify([x]));
+    const a = await opened(tab(storage));
+    expect(a.meetings.value).toEqual([x]);
+    expect(storage.data.has("veil.meetings.v1")).toBe(false);
+    expect(await stored(storage)).toEqual([x]);
+  });
+
+  test("without a sealing key, nothing is written in clear and the list lives in memory", async () => {
+    const storage = sharedStorage();
+    const legacy = meeting();
+    storage.data.set("veil.meetings.v1", JSON.stringify([legacy]));
+    const noKey = sealerFor(() => Promise.reject(new Error("no IndexedDB")), "veil.meetings.v2");
+    const a = await opened(meetingStore(storage, () => NOW, noKey));
+    // The clear copy is still shown, and kept until it can be sealed.
+    expect(a.meetings.value).toEqual([legacy]);
+    expect(storage.data.has("veil.meetings.v1")).toBe(true);
+    const x = meeting();
+    expect(await a.add(x)).toBe(true);
+    expect(ids(a.meetings.value)).toEqual([legacy.id, x.id].sort());
+    expect(a.saved.value).toBe(false);
+    expect(storage.data.has("veil.meetings.v2")).toBe(false);
+  });
+
+  test("a meeting scheduled in another tab survives this tab's own change", async () => {
+    const storage = sharedStorage();
+    const tabA = await opened(tab(storage));
+    const tabB = await opened(tab(storage));
     const x = meeting({ start: NOW + 10 * MIN });
     const y = meeting({ start: NOW + 20 * MIN });
-    expect(tabB.add(x)).toBe(true);
+    expect(await tabB.add(x)).toBe(true);
     // Tab A still shows its old list, then schedules Y.
     expect(tabA.meetings.value).toEqual([]);
-    expect(tabA.add(y)).toBe(true);
+    expect(await tabA.add(y)).toBe(true);
     expect(ids(tabA.meetings.value)).toEqual([x.id, y.id]);
-    const stored = parseMeetings(storage.data.get("veil.meetings.v1") ?? null, NOW);
-    expect(ids(stored)).toEqual([x.id, y.id]);
+    expect(ids(await stored(storage))).toEqual([x.id, y.id]);
     expect(tabA.saved.value).toBe(true);
   });
 
-  test("a removal in one tab neither drops nor brings back the other tab's meetings", () => {
+  test("a removal in one tab neither drops nor brings back the other tab's meetings", async () => {
     const storage = sharedStorage();
-    const tabA = meetingStore(storage, () => NOW);
-    const tabB = meetingStore(storage, () => NOW);
+    const tabA = await opened(tab(storage));
+    const tabB = await opened(tab(storage));
     const x = meeting({ start: NOW + 10 * MIN });
     const y = meeting({ start: NOW + 20 * MIN });
     const z = meeting({ start: NOW + 30 * MIN });
-    tabA.add(x);
-    tabA.add(y);
+    await tabA.add(x);
+    await tabA.add(y);
     // Tab B removes Y; tab A, unaware, removes X: Y must not come back.
-    tabB.remove(y.id);
-    tabA.remove(x.id);
+    await tabB.remove(y.id);
+    await tabA.remove(x.id);
     expect(tabA.meetings.value).toEqual([]);
     // Tab B, unaware of A's removal, adds Z: X must not come back either.
-    tabB.add(z);
+    await tabB.add(z);
     expect(ids(tabB.meetings.value)).toEqual([z.id]);
-    tabA.refresh();
+    await tabA.refresh();
     expect(ids(tabA.meetings.value)).toEqual([z.id]);
   });
 
-  test("the cap counts what is stored, not this tab's copy", () => {
+  test("the cap counts what is stored, not this tab's copy", async () => {
     const storage = sharedStorage();
-    const tabA = meetingStore(storage, () => NOW);
-    const tabB = meetingStore(storage, () => NOW);
-    for (let i = 0; i < MAX_MEETINGS; i++) tabB.add(meeting({ start: NOW + (i + 1) * MIN }));
-    expect(tabA.add(meeting())).toBe(false);
+    const tabA = await opened(tab(storage));
+    const tabB = await opened(tab(storage));
+    for (let i = 0; i < MAX_MEETINGS; i++) await tabB.add(meeting({ start: NOW + (i + 1) * MIN }));
+    expect(await tabA.add(meeting())).toBe(false);
     expect(tabA.meetings.value.length).toBe(MAX_MEETINGS);
   });
 
-  test("a storage event from another tab updates the list", () => {
+  test("a storage event from another tab updates the list", async () => {
     const storage = sharedStorage();
-    const tabA = meetingStore(storage, () => NOW);
-    const tabB = meetingStore(storage, () => NOW);
+    const tabA = await opened(tab(storage));
+    const tabB = await opened(tab(storage));
     const win = new EventTarget();
     followOtherTabs(tabA, win);
     const x = meeting();
-    tabB.add(x);
+    await tabB.add(x);
     win.dispatchEvent(storageEvent("veil.settings.v1"));
+    await settle();
     expect(tabA.meetings.value).toEqual([]);
-    win.dispatchEvent(storageEvent("veil.meetings.v1"));
+    win.dispatchEvent(storageEvent("veil.meetings.v2"));
+    await settle();
     expect(tabA.meetings.value).toEqual([x]);
     // The whole storage cleared elsewhere comes with a null key.
     storage.data.clear();
     win.dispatchEvent(storageEvent(null));
+    await settle();
     expect(tabA.meetings.value).toEqual([]);
   });
 
-  test("without storage, meetings live in memory", () => {
-    const tab = meetingStore(null, () => NOW);
+  test("without storage, meetings live in memory", async () => {
+    const t = await opened(tab(null));
     const x = meeting();
-    expect(tab.add(x)).toBe(true);
-    expect(tab.meetings.value).toEqual([x]);
-    expect(tab.saved.value).toBe(false);
-    tab.remove(x.id);
-    expect(tab.meetings.value).toEqual([]);
+    expect(await t.add(x)).toBe(true);
+    expect(t.meetings.value).toEqual([x]);
+    expect(t.saved.value).toBe(false);
+    await t.remove(x.id);
+    expect(t.meetings.value).toEqual([]);
   });
 
-  test("a storage that refuses reads and writes falls back to memory", () => {
+  test("a storage that refuses reads and writes falls back to memory", async () => {
     const broken: MeetingStorage = {
       getItem: () => {
         throw new Error("SecurityError");
@@ -215,12 +278,13 @@ describe("meetingStore across tabs", () => {
       setItem: () => {
         throw new Error("QuotaExceededError");
       },
+      removeItem: () => {},
     };
-    const tab = meetingStore(broken, () => NOW);
+    const t = await opened(tab(broken));
     const x = meeting();
-    expect(tab.saved.value).toBe(true);
-    expect(tab.add(x)).toBe(true);
-    expect(tab.meetings.value).toEqual([x]);
-    expect(tab.saved.value).toBe(false);
+    expect(t.saved.value).toBe(true);
+    expect(await t.add(x)).toBe(true);
+    expect(t.meetings.value).toEqual([x]);
+    expect(t.saved.value).toBe(false);
   });
 });

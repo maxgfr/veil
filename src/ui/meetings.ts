@@ -2,11 +2,14 @@
  * Scheduled meetings, kept on this device only (localStorage). A meeting is a
  * plain room link plus a title and a time: the room itself exists whenever
  * people open the link. The link holds the room key, so it never leaves the
- * device from here. Every read is defensive: storage may be unavailable or
- * corrupted, and anything malformed is dropped.
+ * device from here, and the list is stored sealed (sealed.ts): every
+ * maxgfr.github.io site can read this origin's localStorage. Every read is
+ * defensive: storage may be unavailable or corrupted, and anything malformed
+ * is dropped.
  */
 import { type Signal, signal } from "@preact/signals";
 import { parseRoomLink } from "../crypto/room";
+import { deviceKey, type Sealer, sealerFor } from "./sealed";
 
 export const DURATIONS = [15, 30, 45, 60, 90, 120] as const;
 export const DEFAULT_DURATION = 30;
@@ -28,7 +31,10 @@ export interface Meeting {
   link: string;
 }
 
-const KEY = "veil.meetings.v1";
+/** The sealed list. */
+const KEY = "veil.meetings.v2";
+/** The list in clear, as earlier versions kept it: sealed into KEY on first read, then removed. */
+const LEGACY_KEY = "veil.meetings.v1";
 
 export const meetingEnd = (m: Meeting): number => m.start + m.minutes * 60_000;
 
@@ -121,57 +127,97 @@ export function meetingStatus(m: Meeting, now: number): MeetingStatus {
 }
 
 /** The part of `Storage` the store uses: localStorage, or a stand-in in tests. */
-export type MeetingStorage = Pick<Storage, "getItem" | "setItem">;
+export type MeetingStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 export interface MeetingStore {
   meetings: Signal<Meeting[]>;
   /** Adds a meeting; false when the list is already full. */
-  add(m: Meeting): boolean;
-  remove(id: string): void;
+  add(m: Meeting): Promise<boolean>;
+  remove(id: string): Promise<void>;
   /** False when this device couldn't keep the list (storage blocked or full): it lasts until the tab closes. */
   saved: Signal<boolean>;
   /** Re-reads storage, after another tab changed it. */
-  refresh(): void;
+  refresh(): Promise<void>;
 }
 
 /**
  * The meetings over one storage. Every change is a read-modify-write against
  * storage, never a write of this tab's copy: another tab may have scheduled or
  * removed a meeting since, and its room key must not be lost. Without storage
- * (private mode, blocked), the list lives in memory.
+ * (private mode, blocked) or a sealing key, the list lives in memory: it is
+ * never written in clear.
  */
 export function meetingStore(
   storage: MeetingStorage | null,
   now: () => number = Date.now,
+  sealer: Sealer = sealerFor(deviceKey, KEY),
 ): MeetingStore {
-  const read = (): Meeting[] | null => {
+  const meetings = signal<Meeting[]>([]);
+  const saved = signal(storage !== null);
+  // One change at a time, in order: each reads what the previous one stored.
+  let queue: Promise<unknown> = Promise.resolve();
+  const serial = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = queue.then(task);
+    queue = run.catch(() => {});
+    return run;
+  };
+
+  /** The stored list; null when storage refused it (read, or no key to open it). */
+  const read = async (): Promise<Meeting[] | null> => {
     if (!storage) return null;
     try {
-      return parseMeetings(storage.getItem(KEY), now());
+      const sealed = storage.getItem(KEY);
+      const stored = sealed === null ? [] : parseMeetings(await sealer.open(sealed), now());
+      const legacy = storage.getItem(LEGACY_KEY);
+      if (legacy === null) return stored;
+      // A list in clear, from an earlier version (or a tab of it still open): seal it in.
+      const list = parseMeetings(
+        JSON.stringify([...stored, ...parseMeetings(legacy, now())]),
+        now(),
+      );
+      try {
+        await write(list);
+      } catch {
+        // No sealing key yet (storage blocked): keep the clear copy until it can be sealed.
+      }
+      return list;
     } catch {
-      // Storage refused the read: fall back to the in-memory list.
       return null;
     }
   };
-  const meetings = signal<Meeting[]>(read() ?? []);
-  const saved = signal(storage !== null);
-  /** Applies `change` to the current list; `null` from it means refused. */
-  const update = (change: (current: Meeting[]) => Meeting[] | null): boolean => {
-    const current = read() ?? meetings.value;
-    const next = change(current);
-    meetings.value = next ?? current;
-    if (!next) return false;
-    if (!storage) return true;
-    try {
-      storage.setItem(KEY, JSON.stringify(next));
-      saved.value = true;
-    } catch (err) {
-      // Storage full or blocked: keep the in-memory list, and say it won't last.
-      console.warn("meetings not saved on this device", err);
-      saved.value = false;
-    }
-    return true;
+
+  const write = async (list: Meeting[]): Promise<void> => {
+    if (!storage) throw new Error("no storage");
+    storage.setItem(KEY, await sealer.seal(JSON.stringify(list)));
+    storage.removeItem(LEGACY_KEY);
   };
+
+  /** Applies `change` to the stored list; `null` from it means refused. */
+  const update = (change: (current: Meeting[]) => Meeting[] | null): Promise<boolean> =>
+    serial(async () => {
+      const current = (await read()) ?? meetings.value;
+      const next = change(current);
+      meetings.value = next ?? current;
+      if (!next) return false;
+      if (!storage) return true;
+      try {
+        await write(next);
+        saved.value = true;
+      } catch (err) {
+        // Storage full or blocked, or no sealing key: keep the in-memory list, and say it won't last.
+        console.warn("meetings not saved on this device", err);
+        saved.value = false;
+      }
+      return true;
+    });
+
+  const refresh = () =>
+    serial(async () => {
+      const stored = await read();
+      if (stored) meetings.value = stored;
+    });
+  void refresh();
+
   return {
     meetings,
     saved,
@@ -181,13 +227,10 @@ export function meetingStore(
           ? null
           : [...cur.filter((x) => x.id !== m.id), m].sort((a, b) => a.start - b.start),
       ),
-    remove: (id) => {
-      update((cur) => cur.filter((m) => m.id !== id));
+    remove: async (id) => {
+      await update((cur) => cur.filter((m) => m.id !== id));
     },
-    refresh: () => {
-      const stored = read();
-      if (stored) meetings.value = stored;
-    },
+    refresh,
   };
 }
 
@@ -196,7 +239,7 @@ export function followOtherTabs(store: MeetingStore, target: EventTarget): void 
   target.addEventListener("storage", (e) => {
     const key = (e as StorageEvent).key;
     // A null key means the whole storage was cleared.
-    if (key === KEY || key === null) store.refresh();
+    if (key === KEY || key === LEGACY_KEY || key === null) void store.refresh();
   });
 }
 

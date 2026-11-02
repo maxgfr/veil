@@ -111,7 +111,10 @@ Verify shows no emojis for them, only a note that they need to update.
   (nickname, transports, relays, STUN/TURN) and the meetings you schedule. A
   scheduled meeting is stored with its link, so this device keeps its room key:
   the same trust as the browser holding the open room, and it never leaves the
-  device (the `.ics` file is built in the page). Messages live in memory;
+  device (the `.ics` file is built in the page). Every `maxgfr.github.io` site
+  shares this origin's storage, so the meetings and the TURN password are
+  stored sealed (AES-GCM under a non-extractable key kept in IndexedDB,
+  `veil-secrets`), never in clear. Messages live in memory;
   received files go to the location you choose, or to the origin's private
   storage until you save them (cleared on the next visit).
 - Dependencies are pinned with a lockfile; GitHub Actions are pinned by commit.
@@ -127,10 +130,11 @@ Verify shows no emojis for them, only a note that they need to update.
 - **Ephemeral identities**: there are no long-term identities, so verification
   holds for the session only.
 - **Scheduled meetings keep the key**: a scheduled meeting's link, and so its
-  room key, sits unencrypted in `localStorage` until you delete the meeting or
-  12 hours after it ends.
-  Anyone who can read this browser's storage (malware, a shared account) can
-  join that room.
+  room key, stays on this device until you delete the meeting or 12 hours
+  after it ends. It is sealed, so a copy of the storage alone yields nothing,
+  but anything that can run code in this origin (malware, a shared account,
+  another `maxgfr.github.io` site you visit) can have the browser unseal it
+  and join that room. The same holds for a TURN password.
 - **No forward secrecy inside a sender-key period**: a member who stays in the
   room can decrypt everything sent under keys they received. Rotation bounds
   this to 10 minutes or 10,000 messages and cuts off departed members.

@@ -15,7 +15,7 @@ import { applyUpdate, updateReady } from "./pwa";
 import { Home } from "./screens/Home";
 import { Lobby, type LobbyChoice } from "./screens/Lobby";
 import type { RoomSession } from "./session";
-import { settings } from "./settings";
+import { settings, turnReady } from "./settings";
 
 type Route =
   | { name: "home" }
@@ -94,6 +94,7 @@ export function App(): JSX.Element {
     setError(null);
     try {
       const [{ RoomSession }, { Room }] = await loadRoom();
+      await turnReady;
       const session = await RoomSession.join({
         key,
         passphrase: c.passphrase,
