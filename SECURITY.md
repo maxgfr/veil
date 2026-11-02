@@ -113,8 +113,9 @@ Verify shows no emojis for them, only a note that they need to update.
   the same trust as the browser holding the open room, and it never leaves the
   device (the `.ics` file is built in the page). Every `maxgfr.github.io` site
   shares this origin's storage, so the meetings and the TURN password are
-  stored sealed (AES-GCM under a non-extractable key kept in IndexedDB,
-  `veil-secrets`), never in clear. Messages live in memory;
+  stored sealed by llm-connect's `sealedStore` (AES-GCM under a
+  non-extractable key kept in IndexedDB, `veil-sealed`), never in clear.
+  Messages live in memory;
   received files go to the location you choose, or to the origin's private
   storage until you save them (cleared on the next visit).
 - Dependencies are pinned with a lockfile; GitHub Actions are pinned by commit.

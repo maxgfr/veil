@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import type { SealedStore } from "llm-connect";
+import { fromUtf8, utf8 } from "../crypto/bytes";
 import { newRoomKey, roomLink } from "../crypto/room";
+import type { LegacyOpener } from "./legacy-sealed";
 import {
   followOtherTabs,
   KEEP_AFTER_END_MS,
@@ -12,7 +15,7 @@ import {
   newMeetingId,
   parseMeetings,
 } from "./meetings";
-import { type Sealer, sealerFor } from "./sealed";
+import { type Sealer, sealerFor } from "./secrets";
 
 const NOW = Date.UTC(2026, 9, 15, 12, 0);
 const MIN = 60_000;
@@ -135,20 +138,42 @@ function sharedStorage(): MeetingStorage & { data: Map<string, string> } {
   };
 }
 
-// The device key, without IndexedDB: one per test file, shared by its "tabs".
+// sealedStore's seal/unseal without IndexedDB: one key per test file, shared by its "tabs".
 const key = crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
   "encrypt",
   "decrypt",
 ]);
-const sealer: Sealer = sealerFor(() => key, "veil.meetings.v2");
-const tab = (storage: MeetingStorage | null) => meetingStore(storage, () => NOW, sealer);
+const sealedStore = (k: Promise<CryptoKey> | null): Pick<SealedStore, "seal" | "unseal"> => ({
+  async seal(name, value) {
+    if (!k) throw new Error("no IndexedDB");
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const params = { name: "AES-GCM", iv, additionalData: utf8(name) };
+    return { v: 2, iv, ciphertext: await crypto.subtle.encrypt(params, await k, utf8(value)) };
+  },
+  async unseal(name, r) {
+    if (!k || !r) return null;
+    const params = { name: "AES-GCM", iv: r.iv, additionalData: utf8(name) };
+    try {
+      return fromUtf8(new Uint8Array(await crypto.subtle.decrypt(params, await k, r.ciphertext)));
+    } catch {
+      return null;
+    }
+  },
+});
+const sealer: Sealer = sealerFor("veil.meetings.v3", sealedStore(key));
+/** What the previous version sealed under its own device key, as the migration opens it. */
+const OLD = "old-device-key:";
+const oldSealed: LegacyOpener = async (text) =>
+  text.startsWith(OLD) ? { plain: text.slice(OLD.length) } : "gone";
+const tab = (storage: MeetingStorage | null, legacy: LegacyOpener = oldSealed) =>
+  meetingStore(storage, () => NOW, sealer, legacy);
 /** A store's first read of storage has settled. */
 const opened = async (s: MeetingStore) => {
   await s.refresh();
   return s;
 };
 const stored = async (storage: { data: Map<string, string> }) =>
-  parseMeetings(await sealer.open(storage.data.get("veil.meetings.v2") ?? ""), NOW);
+  parseMeetings(await sealer.open(storage.data.get("veil.meetings.v3") ?? ""), NOW);
 
 const ids = (list: Meeting[]) => list.map((m) => m.id);
 const storageEvent = (key: string | null) => Object.assign(new Event("storage"), { key });
@@ -183,8 +208,8 @@ describe("meetingStore across tabs", () => {
     const storage = sharedStorage();
     const legacy = meeting();
     storage.data.set("veil.meetings.v1", JSON.stringify([legacy]));
-    const noKey = sealerFor(() => Promise.reject(new Error("no IndexedDB")), "veil.meetings.v2");
-    const a = await opened(meetingStore(storage, () => NOW, noKey));
+    const noKey = sealerFor("veil.meetings.v3", sealedStore(null));
+    const a = await opened(meetingStore(storage, () => NOW, noKey, oldSealed));
     // The clear copy is still shown, and kept until it can be sealed.
     expect(a.meetings.value).toEqual([legacy]);
     expect(storage.data.has("veil.meetings.v1")).toBe(true);
@@ -192,7 +217,48 @@ describe("meetingStore across tabs", () => {
     expect(await a.add(x)).toBe(true);
     expect(ids(a.meetings.value)).toEqual([legacy.id, x.id].sort());
     expect(a.saved.value).toBe(false);
+    expect(storage.data.has("veil.meetings.v3")).toBe(false);
+  });
+
+  test("a list sealed under the previous device key is sealed again, then removed", async () => {
+    const storage = sharedStorage();
+    const x = meeting({ start: NOW + 10 * MIN });
+    const y = meeting({ start: NOW + 20 * MIN });
+    storage.data.set("veil.meetings.v2", OLD + JSON.stringify([x]));
+    storage.data.set("veil.meetings.v1", JSON.stringify([y]));
+    const a = await opened(tab(storage));
+    expect(ids(a.meetings.value)).toEqual([x.id, y.id]);
     expect(storage.data.has("veil.meetings.v2")).toBe(false);
+    expect(storage.data.has("veil.meetings.v1")).toBe(false);
+    expect(ids(await stored(storage))).toEqual([x.id, y.id]);
+    expect([...storage.data.values()].join("")).not.toContain(x.link);
+  });
+
+  test("an old sealed list that can no longer be opened is dropped", async () => {
+    const storage = sharedStorage();
+    storage.data.set("veil.meetings.v2", "sealed under a key that is gone");
+    const a = await opened(tab(storage));
+    expect(a.meetings.value).toEqual([]);
+    expect(storage.data.has("veil.meetings.v2")).toBe(false);
+  });
+
+  test("an old sealed list is kept while its key is out of reach", async () => {
+    const storage = sharedStorage();
+    const x = meeting();
+    storage.data.set("veil.meetings.v2", OLD + JSON.stringify([x]));
+    const a = await opened(tab(storage, async () => "later"));
+    expect(a.meetings.value).toEqual([]);
+    expect(storage.data.get("veil.meetings.v2")).toBe(OLD + JSON.stringify([x]));
+    // Reachable again on the next visit: nothing was lost.
+    expect((await opened(tab(storage))).meetings.value).toEqual([x]);
+    expect(storage.data.has("veil.meetings.v2")).toBe(false);
+  });
+
+  test("a sealed text does not open under another name", async () => {
+    const text = await sealer.seal("[]");
+    expect(await sealer.open(text)).toBe("[]");
+    await expect(sealerFor("veil.turn.v2", sealedStore(key)).open(text)).rejects.toThrow();
+    await expect(sealer.open("short")).rejects.toThrow();
   });
 
   test("a meeting scheduled in another tab survives this tab's own change", async () => {
@@ -250,7 +316,7 @@ describe("meetingStore across tabs", () => {
     win.dispatchEvent(storageEvent("veil.settings.v1"));
     await settle();
     expect(tabA.meetings.value).toEqual([]);
-    win.dispatchEvent(storageEvent("veil.meetings.v2"));
+    win.dispatchEvent(storageEvent("veil.meetings.v3"));
     await settle();
     expect(tabA.meetings.value).toEqual([x]);
     // The whole storage cleared elsewhere comes with a null key.
