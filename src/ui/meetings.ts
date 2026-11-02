@@ -2,14 +2,15 @@
  * Scheduled meetings, kept on this device only (localStorage). A meeting is a
  * plain room link plus a title and a time: the room itself exists whenever
  * people open the link. The link holds the room key, so it never leaves the
- * device from here, and the list is stored sealed (sealed.ts): every
+ * device from here, and the list is stored sealed (secrets.ts): every
  * maxgfr.github.io site can read this origin's localStorage. Every read is
  * defensive: storage may be unavailable or corrupted, and anything malformed
  * is dropped.
  */
 import { type Signal, signal } from "@preact/signals";
 import { parseRoomLink } from "../crypto/room";
-import { deviceKey, type Sealer, sealerFor } from "./sealed";
+import { forgetLegacyKey, type LegacyOpener, openLegacy } from "./legacy-sealed";
+import { type Sealer, sealerFor } from "./secrets";
 
 export const DURATIONS = [15, 30, 45, 60, 90, 120] as const;
 export const DEFAULT_DURATION = 30;
@@ -32,9 +33,11 @@ export interface Meeting {
 }
 
 /** The sealed list. */
-const KEY = "veil.meetings.v2";
+const KEY = "veil.meetings.v3";
 /** The list in clear, as earlier versions kept it: sealed into KEY on first read, then removed. */
 const LEGACY_KEY = "veil.meetings.v1";
+/** The list sealed by the previous version under its own device key: sealed again into KEY, then removed. */
+const OLD_SEALED_KEY = "veil.meetings.v2";
 
 export const meetingEnd = (m: Meeting): number => m.start + m.minutes * 60_000;
 
@@ -150,7 +153,8 @@ export interface MeetingStore {
 export function meetingStore(
   storage: MeetingStorage | null,
   now: () => number = Date.now,
-  sealer: Sealer = sealerFor(deviceKey, KEY),
+  sealer: Sealer = sealerFor(KEY),
+  legacy: LegacyOpener = openLegacy,
 ): MeetingStore {
   const meetings = signal<Meeting[]>([]);
   const saved = signal(storage !== null);
@@ -168,17 +172,30 @@ export function meetingStore(
     try {
       const sealed = storage.getItem(KEY);
       const stored = sealed === null ? [] : parseMeetings(await sealer.open(sealed), now());
-      const legacy = storage.getItem(LEGACY_KEY);
-      if (legacy === null) return stored;
-      // A list in clear, from an earlier version (or a tab of it still open): seal it in.
-      const list = parseMeetings(
-        JSON.stringify([...stored, ...parseMeetings(legacy, now())]),
-        now(),
-      );
+      // Lists from earlier versions (or a tab of one still open): seal them in, then drop them.
+      const older: Meeting[] = [];
+      const merged: string[] = [];
+      const clear = storage.getItem(LEGACY_KEY);
+      if (clear !== null) {
+        older.push(...parseMeetings(clear, now()));
+        merged.push(LEGACY_KEY);
+      }
+      const oldSealed = storage.getItem(OLD_SEALED_KEY);
+      if (oldSealed !== null) {
+        const opened = await legacy(oldSealed, OLD_SEALED_KEY);
+        if (opened === "gone") merged.push(OLD_SEALED_KEY);
+        else if (opened !== "later") {
+          older.push(...parseMeetings(opened.plain, now()));
+          merged.push(OLD_SEALED_KEY);
+        }
+      }
+      if (!merged.length) return stored;
+      const list = parseMeetings(JSON.stringify([...stored, ...older]), now());
       try {
-        await write(list);
+        await write(list, merged);
+        forgetLegacyKey(storage);
       } catch {
-        // No sealing key yet (storage blocked): keep the clear copy until it can be sealed.
+        // No sealing key yet (storage blocked): keep the old copies until they can be sealed.
       }
       return list;
     } catch {
@@ -186,10 +203,11 @@ export function meetingStore(
     }
   };
 
-  const write = async (list: Meeting[]): Promise<void> => {
+  /** Stores the list sealed, then removes the earlier copies it now holds (`merged`). */
+  const write = async (list: Meeting[], merged: string[] = []): Promise<void> => {
     if (!storage) throw new Error("no storage");
     storage.setItem(KEY, await sealer.seal(JSON.stringify(list)));
-    storage.removeItem(LEGACY_KEY);
+    for (const k of merged) storage.removeItem(k);
   };
 
   /** Applies `change` to the stored list; `null` from it means refused. */
@@ -239,7 +257,8 @@ export function followOtherTabs(store: MeetingStore, target: EventTarget): void 
   target.addEventListener("storage", (e) => {
     const key = (e as StorageEvent).key;
     // A null key means the whole storage was cleared.
-    if (key === KEY || key === LEGACY_KEY || key === null) void store.refresh();
+    if (key === KEY || key === LEGACY_KEY || key === OLD_SEALED_KEY || key === null)
+      void store.refresh();
   });
 }
 

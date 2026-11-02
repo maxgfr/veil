@@ -4,11 +4,12 @@
  * a file. Every read is defensive: storage may be unavailable or corrupted.
  *
  * Every maxgfr.github.io site reads this origin's localStorage, so the one secret, a TURN
- * password, is kept out of it in clear: it is stored sealed (sealed.ts) under its own key.
+ * password, is kept out of it in clear: it is stored sealed (secrets.ts) under its own key.
  */
 import { signal } from "@preact/signals";
 import { DEFAULT_RELAYS, DEFAULT_TRACKERS } from "../signal/defaults";
-import { deviceKey, type Sealer, sealerFor } from "./sealed";
+import { forgetLegacyKey, type LegacyOpener, openLegacy } from "./legacy-sealed";
+import { type Sealer, sealerFor } from "./secrets";
 
 export { DEFAULT_RELAYS, DEFAULT_TRACKERS };
 export const DEFAULT_STUN = ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"];
@@ -155,8 +156,10 @@ function load(): Settings {
 export const settings = signal<Settings>(load());
 
 /** The TURN password, sealed. */
-const TURN_KEY = "veil.turn.v1";
-const turnSealer: Sealer = sealerFor(deviceKey, TURN_KEY);
+const TURN_KEY = "veil.turn.v2";
+/** The TURN password sealed by the previous version under its own device key. */
+const OLD_TURN_KEY = "veil.turn.v1";
+const turnSealer: Sealer = sealerFor(TURN_KEY);
 /** The password last stored sealed (or found there), to seal only a changed one. */
 let sealedCredential = "";
 
@@ -197,10 +200,22 @@ export function saveSettings(next: Settings): Promise<boolean> {
 }
 
 /**
- * Brings the TURN password back from its sealed copy. One kept in clear by an earlier version is
- * sealed, then dropped from the preferences.
+ * Brings the TURN password back from its sealed copy. One kept in clear, or sealed under its own
+ * device key, by an earlier version is sealed again, then dropped.
  */
-export async function loadTurn(sealer: Sealer = turnSealer): Promise<void> {
+export async function loadTurn(
+  sealer: Sealer = turnSealer,
+  legacy: LegacyOpener = openLegacy,
+): Promise<void> {
+  await bringBackTurn(sealer);
+  try {
+    await migrateTurn(sealer, legacy);
+  } catch {
+    // No storage: tried again on the next visit.
+  }
+}
+
+async function bringBackTurn(sealer: Sealer): Promise<void> {
   const turn = settings.value.turn;
   if (!turn) return;
   if (turn.credential) {
@@ -217,6 +232,28 @@ export async function loadTurn(sealer: Sealer = turnSealer): Promise<void> {
   } catch {
     // No storage, or no key to open it: no TURN password.
   }
+}
+
+/**
+ * Seals again a TURN password the previous version sealed under its own device key, when nothing
+ * newer holds it, then drops that copy.
+ */
+async function migrateTurn(sealer: Sealer, legacy: LegacyOpener): Promise<void> {
+  const old = localStorage.getItem(OLD_TURN_KEY);
+  if (old === null) return;
+  const turn = settings.value.turn;
+  if (turn && !turn.credential && localStorage.getItem(TURN_KEY) === null) {
+    const opened = await legacy(old, OLD_TURN_KEY);
+    if (opened === "later") return;
+    if (opened !== "gone") {
+      // Not stored again: keep the old copy, and try on the next visit.
+      if (!(await sealTurn(opened.plain, sealer))) return;
+      if (settings.value.turn === turn)
+        settings.value = { ...settings.value, turn: { ...turn, credential: opened.plain } };
+    }
+  }
+  localStorage.removeItem(OLD_TURN_KEY);
+  forgetLegacyKey(localStorage);
 }
 
 /** Settles once the TURN password is back: join a room after it. */
