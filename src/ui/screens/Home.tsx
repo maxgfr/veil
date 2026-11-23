@@ -14,15 +14,21 @@ export function Home(props: {
   /** A fresh room link, for a meeting scheduled for later. */
   newLink: (mode: RoomMode) => string;
   onSettings: () => void;
+  /** Shown on arrival, e.g. for a link that came in cut. */
+  notice?: string | undefined;
 }): JSX.Element {
   const [link, setLink] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [showPass, setShowPass] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(props.notice ?? null);
   const [scanning, setScanning] = useState(false);
   const [about, setAbout] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [Schedule, setSchedule] = useState<{ C: ScheduleView } | null>(null);
+
+  useEffect(() => {
+    if (props.notice) setError(props.notice);
+  }, [props.notice]);
 
   useEffect(() => {
     if (!scheduling || Schedule) return;
@@ -124,7 +130,7 @@ export function Home(props: {
             </button>
           </div>
           {error && (
-            <p class="error" role="alert">
+            <p class="error" role="alert" data-testid="home-error">
               {error}
             </p>
           )}
@@ -154,7 +160,8 @@ export function Home(props: {
                 class="input"
                 type="password"
                 value={passphrase}
-                autoComplete="off"
+                // Never autofill a password saved for this origin: it would silently change the room.
+                autoComplete="new-password"
                 aria-label="Room passphrase"
                 placeholder="Shared separately from the link"
                 onInput={(e) => setPassphrase(e.currentTarget.value)}

@@ -138,12 +138,18 @@ function validate(x: unknown, from: string): SignalMessage | null {
 export interface OpenerOptions {
   maxAgeMs?: number;
   now?: () => number;
+  /**
+   * An authentic envelope (signature checked) came in outside the age window:
+   * one of the two clocks is off by about `offsetMs` (ours minus the sender's).
+   */
+  onSkew?: (offsetMs: number) => void;
 }
 
 export class EnvelopeOpener {
   private readonly seen = new Map<string, number>();
   private readonly maxAge: number;
   private readonly now: () => number;
+  private readonly onSkew: ((offsetMs: number) => void) | undefined;
 
   constructor(
     private readonly sigKey: CryptoKey,
@@ -151,6 +157,7 @@ export class EnvelopeOpener {
   ) {
     this.maxAge = opts.maxAgeMs ?? MAX_AGE_MS;
     this.now = opts.now ?? Date.now;
+    this.onSkew = opts.onSkew;
   }
 
   /** Returns the message, or null if forged, stale, replayed or malformed. Never throws. */
@@ -178,7 +185,11 @@ export class EnvelopeOpener {
       return null;
     }
     const now = this.now();
-    if (Math.abs(now - msg.ts) > this.maxAge) return null;
+    if (Math.abs(now - msg.ts) > this.maxAge) {
+      // Authentic but stale: two members whose clocks disagree never see each other otherwise.
+      this.onSkew?.(now - msg.ts);
+      return null;
+    }
     this.gc(now);
     if (this.seen.has(msg.id)) return null;
     this.seen.set(msg.id, now);

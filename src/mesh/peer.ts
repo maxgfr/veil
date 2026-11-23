@@ -3,8 +3,9 @@
  *  - three negotiated DataChannels (ctrl, chat, file),
  *  - "perfect negotiation" (polite = smaller peer id) so both sides may
  *    renegotiate at any time without glare deadlocks,
- *  - non-trickle ICE: a description is only sent once gathering completes,
- *    so a single message carries everything,
+ *  - non-trickle ICE: a description is only sent once gathering completes
+ *    (or has found a server-reflexive or relay candidate), so a single
+ *    message carries everything,
  *  - an in-band handshake on ctrl that upgrades every channel to a
  *    SecureChannel bound to both DTLS fingerprints (see crypto/session.ts),
  *  - after that, renegotiation travels over the encrypted ctrl channel; the
@@ -48,7 +49,10 @@ export interface PeerOptions {
   initiator: boolean;
   session: string;
   PC?: typeof RTCPeerConnection;
+  /** After this long, stop gathering as soon as a candidate that crosses NATs is there. */
   gatherTimeoutMs?: number;
+  /** Stop gathering after this long whatever was found. */
+  gatherCapMs?: number;
   /** Give up on a connection that never got secured after this long (manual pairing needs minutes). */
   connectTimeoutMs?: number;
 }
@@ -70,6 +74,14 @@ const SILENT_MS = 15_000;
 const DISCONNECTED_GRACE_MS = 4000;
 const GIVE_UP_MS = 45_000;
 const CONNECT_TIMEOUT_MS = 15_000;
+const GATHER_MS = 3000;
+const GATHER_CAP_MS = 8000;
+/** TURN allocations take longer than STUN answers. */
+const GATHER_CAP_TURN_MS = 10_000;
+
+function hasTurn(config: RTCConfiguration): boolean {
+  return (config.iceServers ?? []).some((s) => [s.urls].flat().some((u) => /^turns?:/i.test(u)));
+}
 
 /** First `a=fingerprint:` line of an SDP, normalized. */
 export function sdpFingerprint(sdp: string | undefined): string {
@@ -161,19 +173,41 @@ export class Peer {
 
   // ── negotiation ───────────────────────────────────────────────────────────
 
+  /**
+   * Waits for ICE gathering. Past the first few seconds, a description without
+   * a server-reflexive candidate (a relay one with TURN) would only work on the
+   * same network: slow STUN/TURN answers (mobile, VPN) are worth a few more seconds.
+   */
   private gathered(): Promise<void> {
     if (this.pc.iceGatheringState === "complete") return Promise.resolve();
+    const turn = hasTurn(this.o.rtcConfig);
+    const useful = turn ? / typ relay/ : / typ (srflx|relay)/;
     return new Promise((resolve) => {
+      let late = false;
       const done = () => {
-        clearTimeout(timer);
+        clearTimeout(soft);
+        clearTimeout(cap);
         this.pc.removeEventListener("icegatheringstatechange", check);
+        this.pc.removeEventListener("icecandidate", check);
         resolve();
       };
       const check = () => {
-        if (this.pc.iceGatheringState === "complete") done();
+        if (
+          this.pc.iceGatheringState === "complete" ||
+          (late && useful.test(this.pc.localDescription?.sdp ?? ""))
+        )
+          done();
       };
-      const timer = setTimeout(done, this.o.gatherTimeoutMs ?? 3000);
+      const soft = setTimeout(() => {
+        late = true;
+        check();
+      }, this.o.gatherTimeoutMs ?? GATHER_MS);
+      const cap = setTimeout(
+        done,
+        this.o.gatherCapMs ?? (turn ? GATHER_CAP_TURN_MS : GATHER_CAP_MS),
+      );
       this.pc.addEventListener("icegatheringstatechange", check);
+      this.pc.addEventListener("icecandidate", check);
     });
   }
 

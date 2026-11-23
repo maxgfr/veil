@@ -32,6 +32,8 @@ export function Room(props: {
   link: string;
   mode: RoomMode;
   onLeave: () => void;
+  /** Another room's link was opened while in this one. */
+  otherRoom?: { onOpen: () => void; onDismiss: () => void } | null;
 }): JSX.Element {
   const s = props.session;
   s.tick.value;
@@ -45,7 +47,8 @@ export function Room(props: {
   const [verify, setVerify] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [recordingFiles, setRecordingFiles] = useState<RecordingFiles | null>(null);
-  const [leaveAfterRecording, setLeaveAfterRecording] = useState(false);
+  // Where to go once the recording's files were offered (home, or another room).
+  const [leaveAfterRecording, setLeaveAfterRecording] = useState<(() => void) | null>(null);
   // The tile in large, `${peerId}:camera` or `${peerId}:screen`: yours alone, never sent.
   const [pinned, setPinned] = useState<string | null>(null);
 
@@ -54,11 +57,17 @@ export function Room(props: {
   // A files room never shows the call stage, even if someone else has a camera on.
   const inCall = !files && members.some((m) => m.media.audio || m.media.video || m.media.screen);
   const netOnline = browserOnline.value;
-  const summary = connectionSummary({ online: netOnline, transports: s.transports, others });
+  const summary = connectionSummary({
+    online: netOnline,
+    transports: s.transports,
+    others,
+    links: s.links,
+  });
   const count = others.length === 0 ? "Waiting for others" : `${others.length + 1} in the room`;
   const online = s.transports.filter((t) => t.state === "online").map((t) => t.name);
   const e2eeMedia = inCall && s.mediaE2ee();
   const recorders = members.filter((m) => m.media.recording).map((m) => m.nick);
+  const hint = s.connectivityHint;
 
   const toggleRecording = async () => {
     if (s.recording.value === "idle") {
@@ -71,16 +80,16 @@ export function Room(props: {
   const showRecording = (done: RecordingFiles) => setRecordingFiles(done);
 
   // Leaving while recording stops it first and offers the files before going.
-  const leave = async () => {
+  const leave = async (then: () => void = props.onLeave) => {
     if (s.recording.value !== "idle") {
       const done = await s.stopRecording();
       if (done) {
         showRecording(done);
-        setLeaveAfterRecording(true);
+        setLeaveAfterRecording(() => then);
         return;
       }
     }
-    props.onLeave();
+    then();
   };
 
   useEffect(() => {
@@ -235,23 +244,46 @@ export function Room(props: {
         </div>
       </header>
 
-      {!netOnline ? (
+      {props.otherRoom ? (
+        <div class="banner banner-warn" role="status" data-testid="other-room">
+          <Icon name="link" size={18} />
+          <span>You opened another room link: leave this room to join it.</span>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            onClick={() => void leave(props.otherRoom?.onOpen)}
+            data-testid="open-other-room"
+          >
+            Leave and open it
+          </button>
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label="Stay in this room"
+            onClick={props.otherRoom.onDismiss}
+          >
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+      ) : !netOnline ? (
         <div class="banner banner-bad" role="status" data-testid="offline">
           <Icon name="wifi" size={18} />
           <span>You're offline. The room reconnects when the network comes back.</span>
         </div>
       ) : (
-        s.connectivityHint && (
-          <div class="banner banner-warn" role="status">
+        hint && (
+          <div class="banner banner-warn" role="status" data-testid="connectivity-hint">
             <Icon name="alert" size={18} />
-            <span>{s.connectivityHint}</span>
-            <button
-              type="button"
-              class="btn btn-ghost btn-sm"
-              onClick={() => setSettingsOpen(true)}
-            >
-              Settings
-            </button>
+            <span>{hint.text}</span>
+            {hint.settings && (
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                onClick={() => setSettingsOpen(true)}
+              >
+                Settings
+              </button>
+            )}
           </div>
         )
       )}
@@ -340,9 +372,9 @@ export function Room(props: {
         files={recordingFiles}
         onClose={() => {
           setRecordingFiles(null);
-          setLeaveAfterRecording(false);
+          setLeaveAfterRecording(null);
         }}
-        onLeave={leaveAfterRecording ? props.onLeave : undefined}
+        onLeave={leaveAfterRecording ?? undefined}
       />
       <Toasts toasts={s.toasts} />
     </div>

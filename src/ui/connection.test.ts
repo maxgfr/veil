@@ -41,6 +41,29 @@ describe("connectionSummary", () => {
     expect(s).toMatchObject({ tone: "wait", label: "Looking for peers" });
   });
 
+  test("a pending link means someone was found and is being connected", () => {
+    for (const state of ["connecting", "securing"] as const) {
+      const s = connectionSummary({
+        online: true,
+        transports: [relay("online")],
+        others: [],
+        links: [{ state }],
+      });
+      expect(s).toMatchObject({ tone: "wait", label: "Connecting" });
+      expect(s.hint).toContain("Found someone");
+    }
+  });
+
+  test("a connected member still wins over another pending link", () => {
+    const s = connectionSummary({
+      online: true,
+      transports: [relay("online")],
+      others: [{ link: "connected" }],
+      links: [{ state: "connected" }, { state: "connecting" }],
+    });
+    expect(s).toMatchObject({ tone: "ok", label: "Connected" });
+  });
+
   test("a connecting relay is still being reached", () => {
     const s = connectionSummary({
       online: true,

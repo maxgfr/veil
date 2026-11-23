@@ -102,7 +102,16 @@ export interface RoomEvents {
   keys?(): void;
   memberJoined?(peerId: string): void;
   memberLeft?(peerId: string): void;
+  /** A link died before it was ever secured, for a network reason (not glare, not a leave). */
+  linkFailed?(peerId: string, reason: string): void;
+  /** A connection could not even be created (no WebRTC, a malformed STUN/TURN URL). */
+  setupError?(err: unknown): void;
+  /** A member's envelope was dropped as stale: the clocks are about `offsetMs` apart. */
+  clockSkew?(offsetMs: number): void;
 }
+
+/** Close reasons of a link that never came up because the network did not let it. */
+const NETWORK_FAILURES: ReadonlySet<string> = new Set(["timeout", "unreachable"]);
 
 type Route =
   | { kind: "external"; via?: readonly TransportName[] }
@@ -172,6 +181,7 @@ export class Room {
         onMessage: (msg, via) => this.onSignal(msg, via),
         onStatus: (s) => this.events.transports?.(s),
         onManualOutgoing: (code, to) => this.events.manualCode?.(code, to ? "answer" : "offer"),
+        onSkew: (offset) => this.events.clockSkew?.(offset),
       },
     );
   }
@@ -331,7 +341,7 @@ export class Room {
   createManualOffer(): void {
     const session = toB64u(randomBytes(12));
     const peer = this.newPeer("", session, true, { kind: "manual" });
-    this.manualOffers.set(session, peer);
+    if (peer) this.manualOffers.set(session, peer);
   }
 
   ingestManual(code: string): boolean {
@@ -340,27 +350,41 @@ export class Room {
 
   // ── peers ─────────────────────────────────────────────────────────────────
 
-  private newPeer(remoteId: string, session: string, initiator: boolean, route: Route): Peer {
-    const peer = new Peer(
-      {
-        identity: this.identity,
-        remoteId,
-        bindKey: this.secrets.bindKey,
-        rtcConfig: this.o.rtc ?? {},
-        initiator,
-        session,
-        ...(route.kind === "manual" ? { connectTimeoutMs: 10 * 60_000 } : {}),
-        ...(this.o.PC ? { PC: this.o.PC } : {}),
-      },
-      {
-        state: (p, s) => this.onPeerState(p, s),
-        signal: (p, desc) => void this.routeSignal(p, desc),
-        ctrl: (p, msg) => this.onCtrl(p, msg),
-        gossip: (p, frame) => void this.gossip.receive(frame, p.remoteId),
-        file: (p, frame) => this.events.file?.(p, frame),
-        track: (p, ev) => this.events.track?.(p, ev),
-      },
-    );
+  /** Null when the connection cannot be created: reported, since this runs from timers and events. */
+  private newPeer(
+    remoteId: string,
+    session: string,
+    initiator: boolean,
+    route: Route,
+  ): Peer | null {
+    let peer: Peer;
+    try {
+      peer = new Peer(
+        {
+          identity: this.identity,
+          remoteId,
+          bindKey: this.secrets.bindKey,
+          rtcConfig: this.o.rtc ?? {},
+          initiator,
+          session,
+          ...(route.kind === "manual" ? { connectTimeoutMs: 10 * 60_000 } : {}),
+          ...(this.o.PC ? { PC: this.o.PC } : {}),
+        },
+        {
+          state: (p, s) => this.onPeerState(p, s),
+          signal: (p, desc) => void this.routeSignal(p, desc),
+          ctrl: (p, msg) => this.onCtrl(p, msg),
+          gossip: (p, frame) => void this.gossip.receive(frame, p.remoteId),
+          file: (p, frame) => this.events.file?.(p, frame),
+          track: (p, ev) => this.events.track?.(p, ev),
+        },
+      );
+    } catch (err) {
+      // No WebRTC at all, or a STUN/TURN URL the browser refuses.
+      console.warn("[veil] cannot create a connection", err);
+      this.events.setupError?.(err);
+      return null;
+    }
     this.routes.set(peer, route);
     if (remoteId) this.peers.set(remoteId, peer);
     this.emitLinks();
@@ -399,7 +423,11 @@ export class Room {
   private onPeerState(peer: Peer, state: PeerState): void {
     const id = peer.remoteId;
     if (state === "closed") {
+      const route = this.routes.get(peer);
       this.routes.delete(peer);
+      // Glare ("replaced"), leaves and blocks are not network failures; manual codes wait for a human.
+      if (id && !peer.secure && route?.kind !== "manual" && NETWORK_FAILURES.has(peer.closeReason))
+        this.events.linkFailed?.(id, peer.closeReason);
       if (this.manualOffers.get(peer.session) === peer) this.manualOffers.delete(peer.session);
       if (id && this.peers.get(id) === peer) {
         this.peers.delete(id);
@@ -522,8 +550,7 @@ export class Room {
       // Either we yield, or the other side replaced a connection it considers dead.
       existing.close("replaced");
     }
-    const peer = this.newPeer(from, session, false, route);
-    void peer.acceptRemote({ type: "offer", sdp });
+    void this.newPeer(from, session, false, route)?.acceptRemote({ type: "offer", sdp });
   }
 
   private onAnswer(from: string, sdp: string, session: string): void {

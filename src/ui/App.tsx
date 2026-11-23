@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import {
   encodeRoomKey,
   newRoomKey,
@@ -16,9 +16,10 @@ import { Home } from "./screens/Home";
 import { Lobby, type LobbyChoice } from "./screens/Lobby";
 import type { RoomSession } from "./session";
 import { settings, turnReady } from "./settings";
+import { checkSupport } from "./support";
 
 type Route =
-  | { name: "home" }
+  | { name: "home"; notice?: string }
   | { name: "lobby"; key: Uint8Array; passphrase: string; mode: RoomMode }
   | {
       name: "room";
@@ -34,11 +35,24 @@ function linkFor(key: Uint8Array, mode: RoomMode): string {
   return `${location.href.split("#")[0]}#${roomFragment(key, mode)}`;
 }
 
+const INCOMPLETE_LINK = "This link looks incomplete. Ask for it again.";
+
+/** Home for no fragment; home with a notice for one that holds no key (the link was cut). */
+function homeRoute(): Route {
+  return location.hash.length > 1 ? { name: "home", notice: INCOMPLETE_LINK } : { name: "home" };
+}
+
 function routeFromHash(): Route {
   const key = parseRoomLink(location.hash);
   return key
     ? { name: "lobby", key, passphrase: "", mode: parseRoomMode(location.hash) }
-    : { name: "home" };
+    : homeRoute();
+}
+
+/** Another room's link, opened while in a room. */
+interface NextRoom {
+  key: Uint8Array;
+  mode: RoomMode;
 }
 
 export function App(): JSX.Element {
@@ -46,21 +60,30 @@ export function App(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [nextRoom, setNextRoom] = useState<NextRoom | null>(null);
+  const current = useRef(route);
+  current.current = route;
 
   useEffect(() => {
     const onHash = () => {
-      setRoute((r) => {
-        const key = parseRoomLink(location.hash);
-        if (r.name === "room") return r;
-        return key
+      const key = parseRoomLink(location.hash);
+      const r = current.current;
+      if (r.name === "room") {
+        // Never drop a live room for a link: ask first. The same room's link changes nothing.
+        if (key && encodeRoomKey(key) !== encodeRoomKey(r.key))
+          setNextRoom({ key, mode: parseRoomMode(location.hash) });
+        return;
+      }
+      setRoute((r) =>
+        key
           ? {
               name: "lobby",
               key,
               passphrase: r.name === "lobby" ? r.passphrase : "",
               mode: parseRoomMode(location.hash),
             }
-          : { name: "home" };
-      });
+          : homeRoute(),
+      );
     };
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);
@@ -83,11 +106,9 @@ export function App(): JSX.Element {
   };
 
   const join = async (key: Uint8Array, mode: RoomMode, c: LobbyChoice) => {
-    // Plain http:// on a LAN address (not localhost): the browser withholds WebCrypto.
-    if (!globalThis.crypto?.subtle) {
-      setError(
-        "This page was opened over plain http://, so the browser disables encryption. Open it over https:// or on localhost.",
-      );
+    const unsupported = await checkSupport();
+    if (unsupported) {
+      setError(unsupported);
       return;
     }
     setBusy(true);
@@ -120,6 +141,7 @@ export function App(): JSX.Element {
         onJoin={(key, passphrase, mode) => goLobby(key, passphrase, mode)}
         newLink={(mode) => linkFor(newRoomKey(), mode)}
         onSettings={() => setSettingsOpen(true)}
+        notice={route.notice}
       />
     );
   } else if (route.name === "lobby") {
@@ -136,6 +158,7 @@ export function App(): JSX.Element {
     );
   } else {
     const { RoomView, session } = route;
+    const here = route;
     screen = (
       <RoomView
         session={session}
@@ -143,8 +166,24 @@ export function App(): JSX.Element {
         mode={route.mode}
         onLeave={() => {
           void session.leave();
+          setNextRoom(null);
           goHome();
         }}
+        otherRoom={
+          nextRoom && {
+            onOpen: () => {
+              void session.leave();
+              setNextRoom(null);
+              // The address bar already shows the new link.
+              setError(null);
+              setRoute({ name: "lobby", key: nextRoom.key, passphrase: "", mode: nextRoom.mode });
+            },
+            onDismiss: () => {
+              setNextRoom(null);
+              history.replaceState(null, "", `#${roomFragment(here.key, here.mode)}`);
+            },
+          }
+        }
       />
     );
   }

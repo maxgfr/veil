@@ -67,6 +67,33 @@ describe("envelope", () => {
     expect(await opener.open(future.wire, topic)).toBeNull();
   });
 
+  test("an authentic envelope outside the age window reports the clock skew", async () => {
+    const { key, topic } = await setup();
+    const now = 1_000_000_000;
+    const skews: number[] = [];
+    const opener = new EnvelopeOpener(key, { now: () => now, onSkew: (o) => skews.push(o) });
+    const late = await sealEnvelope(key, topic, FROM, { kind: "hello" }, now - 300_000);
+    expect(await opener.open(late.wire, topic)).toBeNull();
+    expect(skews).toEqual([300_000]);
+    // A forgery with a stale timestamp says nothing about anyone's clock.
+    const other = await importAesKey(randomBytes(32));
+    const forged = await sealEnvelope(other, topic, FROM, { kind: "hello" }, now - 300_000);
+    expect(await opener.open(forged.wire, topic)).toBeNull();
+    const mallory = await createIdentity();
+    const spoofed = await sealEnvelope(
+      key,
+      topic,
+      { peerId: FROM.peerId, edPub: FROM.edPub, sign: mallory.sign },
+      { kind: "hello" },
+      now + 300_000,
+    );
+    expect(await opener.open(spoofed.wire, topic)).toBeNull();
+    // A fresh one is fine.
+    const fresh = await sealEnvelope(key, topic, FROM, { kind: "hello" }, now - 1000);
+    expect(await opener.open(fresh.wire, topic)).not.toBeNull();
+    expect(skews).toEqual([300_000]);
+  });
+
   test("a replayed envelope is rejected", async () => {
     const { key, topic, opener } = await setup();
     const { wire } = await sealEnvelope(key, topic, FROM, { kind: "hello" });

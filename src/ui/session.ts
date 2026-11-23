@@ -67,6 +67,18 @@ export interface RecordingFiles extends RecordingUrls {
 
 const NO_MEDIA: MediaState = { audio: false, video: false, screen: false };
 
+/** Alone this long with no link on the way, the room says what usually keeps people apart. */
+export const STILL_ALONE_MS = 20_000;
+
+const STILL_ALONE_HINT =
+  "Still alone. Check that you both opened the same link, used the same passphrase (if any), and that this device's clock is right.";
+
+export interface ConnectivityHint {
+  text: string;
+  /** Settings (STUN/TURN) can fix it. */
+  settings: boolean;
+}
+
 export class RoomSession {
   readonly tick = signal(0);
   readonly manualCode = signal<{ code: string; kind: "offer" | "answer" } | null>(null);
@@ -81,8 +93,14 @@ export class RoomSession {
   links: LinkInfo[] = [];
   readonly verified = new Set<string>();
   readonly mismatched = new Set<string>();
-  /** Shown when connections keep failing without a TURN server. */
-  connectivityHint: string | null = null;
+  /** Connection setup failed (no WebRTC, a STUN/TURN URL the browser refuses). */
+  private setupHint: string | null = null;
+  /** Genuine envelopes arrive stale: the clocks disagree. */
+  private clockHint: string | null = null;
+  /** Links keep dying before they are secured: usually NAT traversal. */
+  private natHint: string | null = null;
+  private stillAlone = false;
+  private aloneTimer: ReturnType<typeof setTimeout> | undefined;
   readonly chat: Chat;
   readonly files: Files;
   readonly media: Media;
@@ -194,6 +212,9 @@ export class RoomSession {
           session.chat.forget(id);
           session.verified.delete(id);
         },
+        linkFailed: () => session?.onLinkFailed(),
+        setupError: (err) => session?.onSetupError(err),
+        clockSkew: (offset) => session?.onClockSkew(offset),
       },
     );
     const digest = await sha256(room.secrets.sasSalt);
@@ -205,6 +226,7 @@ export class RoomSession {
     }
     session = new RoomSession(room, p, badge);
     await room.start();
+    session.watchAlone();
     if (p.audio || p.video) {
       try {
         await session.media.start({
@@ -259,24 +281,75 @@ export class RoomSession {
     for (const id of this.recordingMembers)
       if (!recording.has(id)) this.toast(`${this.nickOf(id)} stopped recording`);
     this.recordingMembers = recording;
+    this.watchAlone();
     this.changed();
   }
 
   private onLinks(links: LinkInfo[]): void {
     const before = new Map(this.links.map((l) => [l.peerId, l.state]));
     this.links = links;
-    for (const l of links) if (l.state === "connected") this.everConnected = true;
-    // A link that died before ever becoming secure usually means NAT traversal failed.
-    for (const [id, state] of before) {
-      if ((state === "connecting" || state === "securing") && !links.some((l) => l.peerId === id))
-        this.failures++;
+    for (const l of links) {
+      if (l.state !== "connected" || before.get(l.peerId) === "connected") continue;
+      // A link came up: whatever kept us apart does not anymore.
+      this.everConnected = true;
+      this.failures = 0;
+      this.setupHint = this.clockHint = this.natHint = null;
     }
-    if (this.failures >= 2 && !this.params.settings.turn) {
-      this.connectivityHint = this.everConnected
+    this.watchAlone();
+    this.changed();
+  }
+
+  /** A link died before ever becoming secure, for a network reason: NAT traversal, usually. */
+  private onLinkFailed(): void {
+    if (++this.failures < 2) return;
+    this.natHint = this.params.settings.turn
+      ? "The TURN server did not help: check its URL and credentials in Settings."
+      : this.everConnected
         ? "Some members could not be reached directly. A TURN server (Settings) can relay those connections."
         : "Direct connection impossible from this network. Add a TURN server in Settings to relay the connection.";
-    }
     this.changed();
+  }
+
+  private onSetupError(err: unknown): void {
+    const why = (err instanceof Error ? err.message : String(err)).replace(/\.$/, "");
+    this.setupHint = `Connection setup failed: ${why}. Check STUN/TURN in Settings.`;
+    this.changed();
+  }
+
+  private onClockSkew(offsetMs: number): void {
+    // Linked to someone already: the stale envelopes are more likely another member's clock.
+    if (this.links.some((l) => l.state === "connected")) return;
+    const minutes = Math.max(1, Math.round(Math.abs(offsetMs) / 60_000));
+    // Either clock may be the wrong one: say so.
+    this.clockHint = `This device's clock and another member's are about ${minutes} min apart. Set both to automatic time.`;
+    this.changed();
+  }
+
+  /** Alone, with no link on the way: after a while, say what usually keeps two people apart. */
+  private watchAlone(): void {
+    if (this.links.length > 0 || this.room.members.size > 0 || this.left) {
+      clearTimeout(this.aloneTimer);
+      this.aloneTimer = undefined;
+      this.stillAlone = false;
+      return;
+    }
+    if (this.aloneTimer !== undefined || this.stillAlone) return;
+    this.aloneTimer = setTimeout(() => {
+      this.aloneTimer = undefined;
+      this.stillAlone = true;
+      this.changed();
+    }, STILL_ALONE_MS);
+  }
+
+  /** What to tell the user about connecting, the most useful first. */
+  get connectivityHint(): ConnectivityHint | null {
+    if (this.setupHint) return { text: this.setupHint, settings: true };
+    if (this.clockHint) return { text: this.clockHint, settings: false };
+    if (this.natHint) return { text: this.natHint, settings: true };
+    // Only while the relays answer: otherwise the status already says what is wrong.
+    if (this.stillAlone && this.transports.some((t) => t.state === "online"))
+      return { text: STILL_ALONE_HINT, settings: false };
+    return null;
   }
 
   private onApp(author: string, msg: AppMessage): void {
@@ -587,6 +660,7 @@ export class RoomSession {
   async leave(): Promise<void> {
     if (this.left) return;
     this.left = true;
+    clearTimeout(this.aloneTimer);
     if (this.recorder) {
       await this.recorder.stop();
       this.recorder.dispose();

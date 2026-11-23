@@ -43,7 +43,20 @@ describe("room", () => {
     expect(parseRoomLink(`  ${encodeRoomKey(key)} `)).toEqual(key);
     expect(parseRoomLink("https://maxgfr.github.io/veil/")).toBeNull();
     expect(parseRoomLink("#short")).toBeNull();
-    expect(parseRoomLink(`#${encodeRoomKey(key)}x`)).toBeNull();
+    expect(parseRoomLink(`#${encodeRoomKey(key).slice(0, 42)}`)).toBeNull();
+    expect(parseRoomLink(`#${encodeRoomKey(key).slice(0, 42)}!`)).toBeNull();
+  });
+
+  test("junk appended to a link is ignored", () => {
+    const key = newRoomKey();
+    const link = roomLink("https://maxgfr.github.io/veil/", key);
+    expect(parseRoomLink(`${link}?fbclid=x`)).toEqual(key);
+    expect(parseRoomLink(`${link}&utm_source=chat`)).toEqual(key);
+    expect(parseRoomLink(`${link}.`)).toEqual(key);
+    expect(parseRoomLink(`(${link})`)).toEqual(key);
+    const files = roomLink("https://maxgfr.github.io/veil/", key, "files");
+    expect(parseRoomLink(`${files}?fbclid=x`)).toEqual(key);
+    expect(parseRoomMode(`${files}?fbclid=x`)).toBe("files");
   });
 
   test("files links open the files interface and carry the same key", () => {

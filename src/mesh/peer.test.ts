@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FakePC, type FakePeerConnection } from "../../test/fake-rtc";
+import { FakePC, FakePeerConnection } from "../../test/fake-rtc";
 import { randomBytes, utf8 } from "../crypto/bytes";
 import { createIdentity, type Identity } from "../crypto/session";
 import { type Description, Peer, type PeerEvents, type PeerState, sdpFingerprint } from "./peer";
@@ -59,6 +59,63 @@ async function connectedPair(opts: { bindB?: Uint8Array } = {}) {
   a = side(ia, ib.peerId, bindKey, true, () => b);
   b = side(ib, ia.peerId, opts.bindB ?? bindKey, false, () => a);
   return { a, b, ia, ib };
+}
+
+const GATHER_SOFT = 40;
+const GATHER_CAP = 300;
+
+/** A connection whose gathering never completes; a srflx candidate shows up after `srflxMs`. */
+function slowGather(srflxMs: number | null): typeof RTCPeerConnection {
+  return class extends FakePeerConnection {
+    constructor(config?: RTCConfiguration) {
+      super(config);
+      (this as unknown as { gather(): void }).gather = () => {
+        this.iceGatheringState = "gathering";
+        if (srflxMs === null) return;
+        setTimeout(() => {
+          const d = this.localDescription;
+          if (d) this.localDescription = { ...d, sdp: `${d.sdp}${SRFLX}` };
+          this.dispatchEvent(new Event("icecandidate"));
+        }, srflxMs);
+      };
+    }
+  } as unknown as typeof RTCPeerConnection;
+}
+
+const SRFLX =
+  "a=candidate:1 1 udp 1686052607 203.0.113.7 50000 typ srflx raddr 0.0.0.0 rport 0\r\n";
+
+/** How long a fresh initiator takes to emit its offer. */
+async function offerDelay(PC: typeof RTCPeerConnection, rtcConfig: RTCConfiguration = {}) {
+  const [identity, remote] = await Promise.all([createIdentity(), createIdentity()]);
+  const start = Date.now();
+  let at = 0;
+  const peer = new Peer(
+    {
+      identity,
+      remoteId: remote.peerId,
+      bindKey: randomBytes(32),
+      rtcConfig,
+      initiator: true,
+      session: "sess-0001",
+      PC,
+      gatherTimeoutMs: GATHER_SOFT,
+      gatherCapMs: GATHER_CAP,
+    },
+    {
+      state: () => {},
+      signal: () => {
+        at ||= Date.now() - start;
+      },
+      ctrl: () => {},
+      gossip: () => {},
+      file: () => {},
+      track: () => {},
+    },
+  );
+  await until(() => at > 0);
+  peer.close();
+  return at;
 }
 
 describe("peer", () => {
@@ -178,6 +235,21 @@ describe("peer", () => {
     await until(() => signals.some((d) => d.type === "answer"));
     expect(peer.pc.signalingState).toBe("stable");
     peer.close();
+  });
+
+  test("gathering waits past the soft timeout for a server-reflexive candidate", async () => {
+    expect(await offerDelay(slowGather(5))).toBeGreaterThanOrEqual(GATHER_SOFT);
+    expect(await offerDelay(slowGather(5))).toBeLessThan(GATHER_CAP);
+    const late = await offerDelay(slowGather(120));
+    expect(late).toBeGreaterThanOrEqual(120);
+    expect(late).toBeLessThan(GATHER_CAP);
+  });
+
+  test("gathering stops at the cap when nothing crosses NATs", async () => {
+    expect(await offerDelay(slowGather(null))).toBeGreaterThanOrEqual(GATHER_CAP);
+    // With TURN, only a relay candidate is worth sending early.
+    const turn = { iceServers: [{ urls: "turn:turn.example.org:3478" }] };
+    expect(await offerDelay(slowGather(5), turn)).toBeGreaterThanOrEqual(GATHER_CAP);
   });
 
   test("extracts and normalizes the SDP fingerprint", () => {

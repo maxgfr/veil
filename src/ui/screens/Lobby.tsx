@@ -5,6 +5,7 @@ import { type DeviceInfo, listDevices, openDevices } from "../../features/device
 import { DeviceSelect, LevelMeter, useAudioLevel } from "../components/DeviceSettings";
 import { Icon } from "../components/Icons";
 import { saveSettings, settings } from "../settings";
+import { checkSupport } from "../support";
 
 export interface LobbyChoice {
   nick: string;
@@ -31,6 +32,7 @@ export function Lobby(props: {
   const [defaultMic, setDefaultMic] = useState("");
   const [cams, setCams] = useState<DeviceInfo[]>([]);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [unsupported, setUnsupported] = useState<string | null>(null);
   const videoEl = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -82,6 +84,17 @@ export function Lobby(props: {
   useEffect(() => {
     if (videoEl.current) videoEl.current.srcObject = stream;
   }, [stream]);
+
+  // Say it before the user fills anything in, not after a vague failure.
+  useEffect(() => {
+    let cancelled = false;
+    void checkSupport().then((why) => {
+      if (!cancelled) setUnsupported(why);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const level = useAudioLevel(audio ? stream : null);
 
@@ -192,20 +205,21 @@ export function Lobby(props: {
               class="input"
               type="password"
               value={passphrase}
-              autoComplete="off"
+              // Never autofill a password saved for this origin: it would silently change the room.
+              autoComplete="new-password"
               placeholder="Leave empty if there is none"
               onInput={(e) => setPassphrase(e.currentTarget.value)}
             />
           </label>
-          {(mediaError || props.error) && (
-            <p class="error" role="alert">
-              {props.error ?? mediaError}
+          {(unsupported || mediaError || props.error) && (
+            <p class="error" role="alert" data-testid="lobby-error">
+              {unsupported ?? props.error ?? mediaError}
             </p>
           )}
           <button
             type="submit"
             class="btn btn-primary btn-lg btn-block"
-            disabled={props.busy}
+            disabled={props.busy || !!unsupported}
             data-testid="enter-room"
           >
             {props.busy ? "Joining…" : "Join room"}

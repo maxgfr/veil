@@ -4,6 +4,7 @@
  * screen can load it without pulling in the transports.
  */
 import { signal } from "@preact/signals";
+import type { LinkInfo } from "../mesh/room";
 import type { TransportName, TransportStatus } from "../signal/types";
 import type { MemberView } from "./session";
 
@@ -39,6 +40,8 @@ export function connectionSummary(input: {
   online: boolean;
   transports: readonly Pick<TransportStatus, "state">[];
   others: readonly Pick<MemberView, "link">[];
+  /** Direct links, pending ones included: members only appear once a link is up. */
+  links?: readonly Pick<LinkInfo, "state">[];
 }): ConnectionSummary {
   if (!input.online) {
     return {
@@ -53,6 +56,10 @@ export function connectionSummary(input: {
   // A reconnecting peer still counts as connected: the dot waits, it never turns red.
   if (input.others.some((m) => m.link === "reconnecting")) {
     return { tone: "wait", label: "Reconnecting", hint: "A link dropped. Trying to restore it." };
+  }
+  // Someone answered on the relays: "never found each other" and "the link fails" look different.
+  if (input.links?.some((l) => l.state === "connecting" || l.state === "securing")) {
+    return { tone: "wait", label: "Connecting", hint: "Found someone, setting up a direct link…" };
   }
   if (input.transports.some((t) => t.state === "online")) {
     return {

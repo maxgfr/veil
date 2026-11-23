@@ -152,6 +152,8 @@ export interface SignalingEvents {
   onMessage(msg: SignalMessage, via: TransportName): void;
   onStatus(statuses: TransportStatus[]): void;
   onManualOutgoing(code: string, to?: string): void;
+  /** A genuine member's envelope was dropped as stale: the clocks are about `offsetMs` apart. */
+  onSkew?(offsetMs: number): void;
 }
 
 /** Manual codes travel by hand, so they get a longer validity window than network envelopes. */
@@ -171,7 +173,11 @@ export class RoomSignaling {
     private readonly events: SignalingEvents,
   ) {
     this.now = opts.now ?? Date.now;
-    this.opener = new EnvelopeOpener(opts.secrets.sigKey, { now: this.now });
+    // Manual codes are old by nature: only network envelopes say something about the clock.
+    this.opener = new EnvelopeOpener(opts.secrets.sigKey, {
+      now: this.now,
+      onSkew: (offset) => events.onSkew?.(offset),
+    });
     this.manualOpener = new EnvelopeOpener(opts.secrets.sigKey, {
       now: this.now,
       maxAgeMs: MANUAL_MAX_AGE_MS,
@@ -218,6 +224,8 @@ export class RoomSignaling {
   }
 
   async send(out: Outgoing, via?: readonly TransportName[]): Promise<SignalMessage> {
+    // The rollover timer can fire late (a sleeping laptop, a throttled tab): listen on the new day first.
+    if (this.day >= 0 && !this.stopped && utcDay(this.now()) !== this.day) await this.start();
     const topic = await this.opts.secrets.topic(utcDay(this.now()));
     const { wire, message } = await sealEnvelope(
       this.opts.secrets.sigKey,

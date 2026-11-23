@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { serveApp } from "../../test/serve";
+import { toHex } from "../crypto/bytes";
 import { deriveRoomSecrets, newRoomKey } from "../crypto/room";
 import { createIdentity } from "../crypto/session";
 import { decodeManual, encodeManual } from "./manual";
@@ -93,6 +94,42 @@ describe("room signaling", () => {
     expect(b.s.ingestManual("not a code")).toBe(false);
     a.s.stop();
     b.s.stop();
+  });
+
+  test("a send after a missed UTC midnight listens on the new day first", async () => {
+    const DAY = 86_400_000;
+    let now = 20_000 * DAY + DAY / 2;
+    const joined: string[] = [];
+    const sent: string[] = [];
+    const secrets = await deriveRoomSecrets(newRoomKey());
+    const s = new RoomSignaling(
+      {
+        secrets,
+        identity: await createIdentity(),
+        config: CONFIG,
+        now: () => now,
+        factory: (name) =>
+          name === "nostr"
+            ? {
+                name,
+                join: (t) => joined.push(toHex(t)),
+                leave: () => {},
+                send: (t) => sent.push(toHex(t)),
+                status: () => ({ name, state: "online", endpoints: [] }),
+                close: () => {},
+              }
+            : null,
+      },
+      { onMessage: () => {}, onStatus: () => {}, onManualOutgoing: () => {} },
+    );
+    await s.start();
+    // The rollover timer is half a day away: the clock jumps past midnight without it.
+    now += DAY;
+    await s.send({ kind: "hello" });
+    const tomorrow = toHex(await secrets.topic(20_001));
+    expect(sent).toEqual([tomorrow]);
+    expect(joined).toContain(tomorrow);
+    s.stop();
   });
 
   test("manual codes are validated", () => {
