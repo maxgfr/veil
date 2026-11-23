@@ -252,6 +252,106 @@ describe("peer", () => {
     expect(await offerDelay(slowGather(5), turn)).toBeGreaterThanOrEqual(GATHER_CAP);
   });
 
+  test("an unanswered offer is sent again, unchanged, and stops once answered or closed", async () => {
+    const [identity, remote] = await Promise.all([createIdentity(), createIdentity()]);
+    const signals: Description[] = [];
+    const peer = new Peer(
+      {
+        identity,
+        remoteId: remote.peerId,
+        bindKey: randomBytes(32),
+        rtcConfig: {},
+        initiator: true,
+        session: "sess-0003",
+        PC: FakePC,
+        offerResendMs: [30, 60, 400],
+      },
+      {
+        state() {},
+        signal: (_p, d) => void signals.push(d),
+        ctrl() {},
+        gossip() {},
+        file() {},
+        track() {},
+      },
+    );
+    await until(() => signals.length === 3);
+    expect(new Set(signals.map((d) => `${d.type}|${d.sdp}`)).size).toBe(1);
+    peer.close();
+    await wait(450);
+    expect(signals.length).toBe(3);
+  });
+
+  test("a connected pair sends its offer once", async () => {
+    const [ia, ib] = await Promise.all([createIdentity(), createIdentity()]);
+    const bindKey = randomBytes(32);
+    const offers: Description[] = [];
+    let b!: Peer;
+    const events = (out: Description[], other: () => Peer): PeerEvents => ({
+      state() {},
+      signal: (_p, d) => {
+        out.push(d);
+        setTimeout(() => void other().acceptRemote(d), 1);
+      },
+      ctrl() {},
+      gossip() {},
+      file() {},
+      track() {},
+    });
+    const common = { bindKey, rtcConfig: {}, session: "sess-0004", PC: FakePC };
+    const a = new Peer(
+      { ...common, identity: ia, remoteId: ib.peerId, initiator: true, offerResendMs: [60, 120] },
+      events(offers, () => b),
+    );
+    b = new Peer(
+      { ...common, identity: ib, remoteId: ia.peerId, initiator: false },
+      events([], () => a),
+    );
+    await until(() => a.state === "connected" && b.state === "connected");
+    await wait(180);
+    expect(offers.length).toBe(1);
+    a.close();
+    b.close();
+  });
+
+  test("a copy of the offer it answered gets the same answer back", async () => {
+    const [identity, remote] = await Promise.all([createIdentity(), createIdentity()]);
+    const signals: Description[] = [];
+    const peer = new Peer(
+      {
+        identity,
+        remoteId: remote.peerId,
+        bindKey: randomBytes(32),
+        rtcConfig: {},
+        initiator: false,
+        session: "sess-0005",
+        PC: FakePC,
+      },
+      {
+        state() {},
+        signal: (_p, d) => void signals.push(d),
+        ctrl() {},
+        gossip() {},
+        file() {},
+        track() {},
+      },
+    );
+    const offerer = new FakePC({}) as unknown as RTCPeerConnection;
+    await offerer.setLocalDescription();
+    const offer = offerer.localDescription as Description;
+    void peer.acceptRemote(offer);
+    // Still gathering: nothing to send yet, but it is not a new offer either.
+    expect(peer.repeatAnswer(offer.sdp)).toBe(true);
+    await until(() => signals.length === 1);
+    expect(peer.repeatAnswer(offer.sdp)).toBe(true);
+    expect(signals.length).toBe(2);
+    expect(signals[1]).toEqual(signals[0] as Description);
+    expect(signals[0]?.type).toBe("answer");
+    // Another offer (an ICE restart) is negotiated, not answered from memory.
+    expect(peer.repeatAnswer(`${offer.sdp}a=x-other\r\n`)).toBe(false);
+    peer.close();
+  });
+
   test("extracts and normalizes the SDP fingerprint", () => {
     expect(sdpFingerprint("v=0\r\na=fingerprint:SHA-256 ab:cd\r\n")).toBe("sha-256 AB:CD");
     expect(sdpFingerprint("v=0\r\n")).toBe("");

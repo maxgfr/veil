@@ -145,12 +145,22 @@ export class Room {
   private rotateTimer?: ReturnType<typeof setTimeout>;
   private helloTimer?: ReturnType<typeof setTimeout>;
   private helloCount = 0;
+  private nextHelloAt = 0;
+  private readonly online = new Set<TransportName>();
   private media: MediaState = { audio: false, video: false, screen: false };
   private nick: string;
   private readonly joinedAt = Date.now();
   private stopped = false;
   private readonly degree: number;
   private readonly onOnline = () => this.restartIce();
+  /** Back from the background (mobile) or the back/forward cache: sockets and timers may have slept. */
+  private readonly onWake = (e: Event) => {
+    const awake =
+      e.type === "pageshow"
+        ? (e as PageTransitionEvent).persisted
+        : globalThis.document?.visibilityState === "visible";
+    if (awake) this.resume();
+  };
 
   private constructor(
     readonly identity: Identity,
@@ -179,7 +189,7 @@ export class Room {
       },
       {
         onMessage: (msg, via) => this.onSignal(msg, via),
-        onStatus: (s) => this.events.transports?.(s),
+        onStatus: (s) => this.onTransports(s),
         onManualOutgoing: (code, to) => this.events.manualCode?.(code, to ? "answer" : "offer"),
         onSkew: (offset) => this.events.clockSkew?.(offset),
       },
@@ -219,6 +229,8 @@ export class Room {
       }, 30_000),
     );
     globalThis.addEventListener?.("online", this.onOnline);
+    globalThis.addEventListener?.("pageshow", this.onWake);
+    globalThis.document?.addEventListener("visibilitychange", this.onWake);
     void this.publishPresence();
   }
 
@@ -233,6 +245,8 @@ export class Room {
     if (this.stopped) return;
     this.stopped = true;
     globalThis.removeEventListener?.("online", this.onOnline);
+    globalThis.removeEventListener?.("pageshow", this.onWake);
+    globalThis.document?.removeEventListener("visibilitychange", this.onWake);
     for (const t of this.timers) clearInterval(t);
     for (const t of this.helloTimers.values()) clearTimeout(t);
     clearTimeout(this.helloTimer);
@@ -246,6 +260,7 @@ export class Room {
   /** Hello cadence: fast while alone, then a slow beat that also merges split groups. */
   private scheduleHello(delay: number): void {
     clearTimeout(this.helloTimer);
+    this.nextHelloAt = Date.now() + delay;
     this.helloTimer = setTimeout(() => {
       if (this.stopped) return;
       void this.signaling.send({ kind: "hello" }).catch(() => {});
@@ -253,6 +268,39 @@ export class Room {
       const alone = this.readyIds().length === 0;
       this.scheduleHello(alone ? (this.helloCount < 8 ? 3000 : 15_000) : 60_000);
     }, delay);
+  }
+
+  /** Back to the fast hello beat; `now` says hello right away instead of within 3 s. */
+  private resetHello(now: boolean): void {
+    if (this.stopped || this.helloTimer === undefined) return;
+    this.helloCount = 0;
+    if (now) this.scheduleHello(0);
+    else if (this.readyIds().length === 0 && this.nextHelloAt - Date.now() > 3000)
+      this.scheduleHello(3000);
+  }
+
+  /**
+   * The page woke up: sockets that died meanwhile reconnect now instead of after their backoff,
+   * and we say hello at once, since whoever looked for us may have given up.
+   */
+  resume(): void {
+    if (this.stopped) return;
+    this.signaling.resume();
+    this.resetHello(true);
+  }
+
+  /** A transport that comes (back) online makes the fast hello beat worth it again. */
+  private onTransports(statuses: TransportStatus[]): void {
+    let back = false;
+    for (const s of statuses) {
+      if (s.state !== "online") this.online.delete(s.name);
+      else if (!this.online.has(s.name)) {
+        this.online.add(s.name);
+        back = true;
+      }
+    }
+    if (back) this.resetHello(false);
+    this.events.transports?.(statuses);
   }
 
   restartIce(): void {
@@ -367,7 +415,8 @@ export class Room {
           rtcConfig: this.o.rtc ?? {},
           initiator,
           session,
-          ...(route.kind === "manual" ? { connectTimeoutMs: 10 * 60_000 } : {}),
+          // A manual code travels by hand: sending it again would only show a new one.
+          ...(route.kind === "manual" ? { connectTimeoutMs: 10 * 60_000, offerResendMs: [] } : {}),
           ...(this.o.PC ? { PC: this.o.PC } : {}),
         },
         {
@@ -540,13 +589,13 @@ export class Room {
     const existing = this.peers.get(from);
     if (existing) {
       if (existing.session === session) {
-        void existing.acceptRemote({ type: "offer", sdp });
+        // A copy of an offer we already answered: our answer was lost, not a new negotiation.
+        if (!existing.repeatAnswer(sdp)) void existing.acceptRemote({ type: "offer", sdp });
         return;
       }
-      if (!existing.secure) {
-        // Both sides started a connection at once: the polite (smaller id) side yields.
-        if (this.peerId > from) return;
-      }
+      // Both sides started a connection at once: the polite (smaller id) side yields. Only our own
+      // offer can collide: an answerer for another session is one the other side gave up on.
+      if (!existing.secure && existing.initiator && this.peerId > from) return;
       // Either we yield, or the other side replaced a connection it considers dead.
       existing.close("replaced");
     }

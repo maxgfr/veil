@@ -33,6 +33,8 @@ export interface SignalTransport {
   /** Broadcast to the topic, or best-effort direct delivery when the transport can route by peer. */
   send(topic: Uint8Array, wire: string, to?: string): void;
   status(): TransportStatus;
+  /** The page woke up: reconnect sockets that are down, or too quiet to still be alive. */
+  resume?(): void;
   close(): void;
 }
 

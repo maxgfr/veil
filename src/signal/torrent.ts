@@ -23,6 +23,11 @@ export { DEFAULT_TRACKERS } from "./defaults";
 
 const FANOUT = 10;
 const REANNOUNCE_MS = 50_000;
+/** Sends made while no tracker is up wait this long for one, as on Nostr. */
+const QUEUE_TTL_MS = 30_000;
+const QUEUE_MAX = 64;
+/** An open socket that heard nothing for this long (trackers answer every announce) may be dead. */
+const SILENT_MS = 60_000;
 
 /** The tracker protocol carries binary ids as latin1 strings. */
 export function infoHash(topic: Uint8Array): string {
@@ -36,6 +41,15 @@ interface Tracker {
   detail?: string;
   attempt: number;
   timer?: ReturnType<typeof setTimeout>;
+  /** Last time the socket opened or carried a message. */
+  heard: number;
+}
+
+interface Queued {
+  at: number;
+  hash: string;
+  wire: string;
+  to?: string;
 }
 
 interface TrackerMessage {
@@ -56,6 +70,7 @@ export class TorrentTransport implements SignalTransport {
   readonly name = "torrent" as const;
   private readonly trackers: Tracker[];
   private readonly topics = new Map<string, Uint8Array>();
+  private queue: Queued[] = [];
   private closed = false;
   private readonly WS: WebSocketCtor;
   private readonly interval: ReturnType<typeof setInterval>;
@@ -74,6 +89,7 @@ export class TorrentTransport implements SignalTransport {
       ws: null,
       state: "connecting",
       attempt: 0,
+      heard: 0,
     }));
     for (const t of this.trackers) this.connect(t);
     this.interval = setInterval(() => {
@@ -98,8 +114,12 @@ export class TorrentTransport implements SignalTransport {
     ws.onopen = () => {
       t.state = "online";
       t.attempt = 0;
+      t.heard = Date.now();
       delete t.detail;
       for (const hash of this.topics.keys()) this.announce(t, hash, "started");
+      const now = Date.now();
+      this.queue = this.queue.filter((q) => now - q.at < QUEUE_TTL_MS);
+      for (const q of this.queue) this.deliver(t, q.hash, q.wire, q.to);
       this.emit();
     };
     ws.onmessage = (e) => this.onMessage(t, e.data);
@@ -116,6 +136,25 @@ export class TorrentTransport implements SignalTransport {
       this.emit();
     };
     this.emit();
+  }
+
+  /** Reconnects now, dropping the current socket (if any) without waiting for its close. */
+  private reconnect(t: Tracker): void {
+    clearTimeout(t.timer);
+    const ws = t.ws;
+    t.ws = null;
+    t.attempt = 0;
+    ws?.close();
+    this.connect(t);
+  }
+
+  resume(): void {
+    if (this.closed) return;
+    const now = Date.now();
+    for (const t of this.trackers) {
+      const alive = t.ws && (t.state !== "online" || now - t.heard < SILENT_MS);
+      if (!alive) this.reconnect(t);
+    }
   }
 
   private sendTo(t: Tracker, msg: unknown): void {
@@ -135,6 +174,7 @@ export class TorrentTransport implements SignalTransport {
   }
 
   private onMessage(t: Tracker, data: unknown): void {
+    t.heard = Date.now();
     if (typeof data !== "string") return;
     let msg: TrackerMessage;
     try {
@@ -169,29 +209,40 @@ export class TorrentTransport implements SignalTransport {
 
   send(topic: Uint8Array, wire: string, to?: string): void {
     const hash = infoHash(topic);
+    let sent = false;
     for (const t of this.trackers) {
-      if (to) {
-        this.sendTo(t, {
-          action: "announce",
-          info_hash: hash,
-          peer_id: this.peerId,
-          to_peer_id: to,
-          offer_id: toB64u(randomBytes(15)),
-          answer: { type: "answer", sdp: wire },
-        });
-      } else {
-        const offers = Array.from({ length: FANOUT }, () => ({
-          offer_id: toB64u(randomBytes(15)),
-          offer: { type: "offer", sdp: wire },
-        }));
-        this.sendTo(t, {
-          action: "announce",
-          info_hash: hash,
-          peer_id: this.peerId,
-          numwant: FANOUT,
-          offers,
-        });
+      if (t.state === "online" && t.ws) {
+        this.deliver(t, hash, wire, to);
+        sent = true;
       }
+    }
+    if (!sent)
+      this.queue.push(to ? { at: Date.now(), hash, wire, to } : { at: Date.now(), hash, wire });
+    if (this.queue.length > QUEUE_MAX) this.queue.shift();
+  }
+
+  private deliver(t: Tracker, hash: string, wire: string, to?: string): void {
+    if (to) {
+      this.sendTo(t, {
+        action: "announce",
+        info_hash: hash,
+        peer_id: this.peerId,
+        to_peer_id: to,
+        offer_id: toB64u(randomBytes(15)),
+        answer: { type: "answer", sdp: wire },
+      });
+    } else {
+      const offers = Array.from({ length: FANOUT }, () => ({
+        offer_id: toB64u(randomBytes(15)),
+        offer: { type: "offer", sdp: wire },
+      }));
+      this.sendTo(t, {
+        action: "announce",
+        info_hash: hash,
+        peer_id: this.peerId,
+        numwant: FANOUT,
+        offers,
+      });
     }
   }
 

@@ -82,6 +82,7 @@ struct Slot {
     session: String,
     tx: mpsc::UnboundedSender<PeerCmd>,
     ready: bool,
+    initiator: bool,
     mesh: bool,
 }
 
@@ -164,6 +165,12 @@ fn distance(a: &str, b: &str) -> u64 {
 
 fn hex_val(c: u8) -> u8 {
     (c as char).to_digit(16).unwrap_or(0) as u8
+}
+
+/// Both sides started at once: the polite (smaller id) side yields. Only our own offer can
+/// collide: an answerer for another session is one the other side gave up on, so it is replaced.
+fn yields_to(slot: &Slot, me: &str, from: &str) -> bool {
+    !slot.ready && slot.initiator && me > from
 }
 
 impl Room {
@@ -280,7 +287,7 @@ impl Room {
             self.peer_tx.clone(),
         );
         self.keys_by_slot.insert(key, remote.to_string());
-        self.peers.insert(remote.to_string(), Slot { key, session, tx, ready: false, mesh });
+        self.peers.insert(remote.to_string(), Slot { key, session, tx, ready: false, initiator, mesh });
     }
 
     fn connect(&mut self, to: &str, mesh: bool) {
@@ -296,8 +303,7 @@ impl Room {
                 let _ = slot.tx.send(PeerCmd::Remote { kind: "offer".into(), sdp });
                 return;
             }
-            // Both sides started at once: the polite (smaller id) side yields.
-            if !slot.ready && self.id.peer_id.as_str() > from {
+            if yields_to(slot, &self.id.peer_id, from) {
                 return;
             }
             self.drop_slot(from, "replaced");
@@ -680,5 +686,26 @@ impl Room {
         for (_, s) in self.peers.drain() {
             let _ = s.tx.send(PeerCmd::Close("leaving".into()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slot(ready: bool, initiator: bool) -> Slot {
+        let (tx, _) = mpsc::unbounded_channel();
+        Slot { key: 1, session: "s1".into(), tx, ready, initiator, mesh: false }
+    }
+
+    #[test]
+    fn only_a_pending_offer_of_ours_wins_a_collision() {
+        // Glare: our own pending offer, and the larger id keeps it.
+        assert!(yields_to(&slot(false, true), "bb", "aa"));
+        assert!(!yields_to(&slot(false, true), "aa", "bb"));
+        // A stale answerer (the other side retries with a new session) is replaced.
+        assert!(!yields_to(&slot(false, false), "bb", "aa"));
+        // A connected link is replaced: the other side considers it dead.
+        assert!(!yields_to(&slot(true, true), "bb", "aa"));
     }
 }

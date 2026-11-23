@@ -122,6 +122,10 @@ export class SignalMux {
     for (const name of names) this.transports.get(name)?.send(topic, wire, opts.to);
   }
 
+  resume(): void {
+    for (const t of this.transports.values()) t.resume?.();
+  }
+
   manual(): ManualTransport | undefined {
     const t = this.transports.get("manual");
     return t instanceof ManualTransport ? t : undefined;
@@ -248,6 +252,10 @@ export class RoomSignaling {
 
   status(): TransportStatus[] {
     return this.mux.status();
+  }
+
+  resume(): void {
+    if (!this.stopped) this.mux.resume();
   }
 
   stop(): void {

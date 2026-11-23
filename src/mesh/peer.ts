@@ -55,6 +55,8 @@ export interface PeerOptions {
   gatherCapMs?: number;
   /** Give up on a connection that never got secured after this long (manual pairing needs minutes). */
   connectTimeoutMs?: number;
+  /** When to send an unanswered first offer again, in case it or its answer was lost (none for manual codes). */
+  offerResendMs?: readonly number[];
 }
 
 export interface PeerEvents {
@@ -78,6 +80,8 @@ const GATHER_MS = 3000;
 const GATHER_CAP_MS = 8000;
 /** TURN allocations take longer than STUN answers. */
 const GATHER_CAP_TURN_MS = 10_000;
+/** Well inside CONNECT_TIMEOUT_MS, so a lost message costs seconds instead of a whole new attempt. */
+const OFFER_RESEND_MS = [5000, 10_000];
 
 function hasTurn(config: RTCConfiguration): boolean {
   return (config.iceServers ?? []).some((s) => [s.urls].flat().some((u) => /^turns?:/i.test(u)));
@@ -93,6 +97,7 @@ export class Peer {
   readonly pc: RTCPeerConnection;
   remoteId: string;
   readonly session: string;
+  readonly initiator: boolean;
   state: PeerState = "connecting";
   secure: PeerSession | null = null;
   localFp = "";
@@ -121,7 +126,11 @@ export class Peer {
   private readonly createdAt = Date.now();
   private downSince: number | null = null;
   private readonly timers: ReturnType<typeof setInterval>[] = [];
+  private readonly resendTimers: ReturnType<typeof setTimeout>[] = [];
   private disconnectTimer?: ReturnType<typeof setTimeout>;
+  /** The answerer's last remote offer and our answer to it: a copy of that offer means the answer was lost. */
+  private remoteOffer = "";
+  private answer: Description | null = null;
 
   constructor(
     private readonly o: PeerOptions,
@@ -130,6 +139,7 @@ export class Peer {
     const PC = o.PC ?? RTCPeerConnection;
     this.remoteId = o.remoteId;
     this.session = o.session;
+    this.initiator = o.initiator;
     this.pc = new PC({ bundlePolicy: "max-bundle", ...o.rtcConfig });
     this.pc.onnegotiationneeded = () => void this.negotiate();
     this.pc.ontrack = (ev) => this.events.track(this, ev);
@@ -241,7 +251,35 @@ export class Peer {
       void this.sendCtrl({ t: "sdp", type: desc.type, sdp: desc.sdp });
     } else {
       this.events.signal(this, desc);
+      if (desc.type === "answer") this.answer = desc;
+      else if (this.o.initiator && !this.secure) this.resendOffer(desc);
     }
+  }
+
+  /** Sends the offer again while nothing answered it: one lost message must not cost the whole attempt. */
+  private resendOffer(desc: Description): void {
+    for (const ms of this.o.offerResendMs ?? OFFER_RESEND_MS) {
+      const timer = setTimeout(() => {
+        if (
+          this.state !== "closed" &&
+          !this.secure &&
+          this.pc.signalingState === "have-local-offer" &&
+          this.pc.localDescription?.sdp === desc.sdp
+        )
+          this.events.signal(this, desc);
+      }, ms);
+      this.resendTimers.push(timer);
+    }
+  }
+
+  /**
+   * True when `sdp` is a copy of the offer this not-yet-connected answerer already took: the
+   * other side lost our answer, so it goes out again (once it exists: it may still be gathering).
+   */
+  repeatAnswer(sdp: string): boolean {
+    if (this.o.initiator || this.secure || sdp !== this.remoteOffer) return false;
+    if (this.answer && this.state !== "closed") this.events.signal(this, this.answer);
+    return true;
   }
 
   private negotiation: Promise<void> = Promise.resolve();
@@ -252,6 +290,10 @@ export class Peer {
    * previous answer is still being applied must not look like a collision.
    */
   acceptRemote(desc: Description): Promise<void> {
+    if (desc.type === "offer" && desc.sdp !== this.remoteOffer) {
+      this.remoteOffer = desc.sdp;
+      this.answer = null;
+    }
     const run = this.negotiation.then(() => this.applyRemote(desc));
     this.negotiation = run.catch(() => {});
     return run;
@@ -508,6 +550,7 @@ export class Peer {
     }
     this.state = "closed";
     for (const t of this.timers) clearInterval(t);
+    for (const t of this.resendTimers) clearTimeout(t);
     clearTimeout(this.disconnectTimer);
     const pc = this.pc;
     // Let the bye flush before tearing the connection down.

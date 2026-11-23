@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { defaultSettings, parseSettings } from "./settings";
+import { defaultSettings, parseSettings, settleWithin } from "./settings";
 
 describe("parseSettings ai", () => {
   test("keeps valid values", () => {
@@ -93,5 +93,20 @@ describe("parseSettings language", () => {
   test("anything else falls back to the browser's", () => {
     expect(parseSettings(JSON.stringify({ language: "<b>" })).language).toBe("");
     expect(parseSettings(JSON.stringify({ language: 7 })).language).toBe("");
+  });
+});
+
+describe("settleWithin", () => {
+  test("gives up on a promise that never settles", async () => {
+    const start = Date.now();
+    await settleWithin(new Promise(() => {}), 30);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(25);
+  });
+
+  test("settles as soon as the promise does, even when it fails", async () => {
+    const start = Date.now();
+    await settleWithin(Promise.resolve(), 10_000);
+    await settleWithin(Promise.reject(new Error("no storage")), 10_000);
+    expect(Date.now() - start).toBeLessThan(1000);
   });
 });

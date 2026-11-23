@@ -262,6 +262,8 @@ struct Actor {
     local_fp: String,
     remote_fp: String,
     remote_ed_pub: Vec<u8>,
+    /// The last offer taken from outside: a copy of it before the link is up means our answer was lost.
+    remote_offer: String,
     pending: Vec<(usize, Vec<u8>)>,
     last_heard: Instant,
     started: Instant,
@@ -310,6 +312,7 @@ async fn run(
         local_fp: String::new(),
         remote_fp: String::new(),
         remote_ed_pub: Vec::new(),
+        remote_offer: String::new(),
         pending: Vec::new(),
         last_heard: Instant::now(),
         started: Instant::now(),
@@ -352,6 +355,11 @@ async fn run(
     }
     a.close("closed").await;
     Ok(())
+}
+
+/// A copy of the offer already taken, while the link is not up yet: its answer was lost on the way.
+fn is_repeated_offer(last: &str, sdp: &str, secure: bool) -> bool {
+    !secure && !last.is_empty() && last == sdp
 }
 
 impl Actor {
@@ -424,7 +432,15 @@ impl Actor {
             bail!("fingerprint changed");
         }
         let polite = self.opts.identity.peer_id < self.opts.remote_id;
+        if kind == "offer" && is_repeated_offer(&self.remote_offer, &sdp, self.secure.is_some()) {
+            // The other side sent its offer again: send the same answer back, no renegotiation.
+            if self.pc.local_description().await.is_some_and(|d| d.sdp_type == RTCSdpType::Answer) {
+                self.emit_description().await?;
+            }
+            return Ok(());
+        }
         if kind == "offer" {
+            self.remote_offer.clone_from(&sdp);
             if self.have_local_offer {
                 // Glare: the impolite side keeps its offer, the polite one rolls back.
                 if !polite {
@@ -704,6 +720,15 @@ mod tests {
         assert_eq!(b.decrypt(&m1).unwrap(), b"one");
         assert!(b.decrypt(&m0).is_err(), "reordered");
         assert!(b.decrypt(&m1).is_err(), "replayed");
+    }
+
+    #[test]
+    fn a_repeated_offer_is_only_recognized_before_the_link_is_up() {
+        assert!(is_repeated_offer("v=0 a", "v=0 a", false));
+        assert!(!is_repeated_offer("v=0 a", "v=0 b", false));
+        assert!(!is_repeated_offer("", "", false));
+        // Once connected, a description from outside is an ICE restart: always applied.
+        assert!(!is_repeated_offer("v=0 a", "v=0 a", true));
     }
 
     #[test]

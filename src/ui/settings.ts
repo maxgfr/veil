@@ -256,8 +256,23 @@ async function migrateTurn(sealer: Sealer, legacy: LegacyOpener): Promise<void> 
   forgetLegacyKey(localStorage);
 }
 
-/** Settles once the TURN password is back: join a room after it. */
-export const turnReady: Promise<void> = loadTurn();
+/** Settles when `p` does, or after `ms` whatever happens: storage that never answers must not block. */
+export function settleWithin(p: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    p.then(done, done);
+  });
+}
+
+/** An IndexedDB open that never fires must not hang Join: the room starts without the password. */
+const TURN_WAIT_MS = 3000;
+
+/** Settles once the TURN password is back (or after a few seconds): join a room after it. */
+export const turnReady: Promise<void> = settleWithin(loadTurn(), TURN_WAIT_MS);
 
 export function resetSettings(): Promise<boolean> {
   const nick = settings.value.nick;
